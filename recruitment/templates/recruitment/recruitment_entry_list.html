@@ -1,0 +1,124 @@
+{% extends "internal_base.html" %}
+{% load recruitment_ui %}
+
+{% block internal_content %}
+<div class="rg-page-header">
+    <div>
+        <p class="rg-eyebrow">Recruitment Entry Management</p>
+        <h1 class="rg-page-title">Recruitment Entries</h1>
+        <p class="rg-page-copy">Manage Plantilla vacancies and COS openings or pooling entries within the shared internal administration portal, without changing the underlying backend or branch-specific workflow logic.</p>
+    </div>
+    <div class="rg-page-actions">
+        <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary">Dashboard</a>
+        <a href="{% url 'position-catalog-list' %}" class="btn btn-outline-secondary">Position Catalog</a>
+        <a href="{% url 'recruitment-entry-create' %}" class="btn btn-rg-primary">New Entry</a>
+    </div>
+</div>
+
+<div class="rg-kpi-grid mb-4">
+    <div class="rg-kpi">
+        <span class="rg-kpi__label">Recorded Entries</span>
+        <strong class="rg-kpi__value">{{ entries|length }}</strong>
+        <span class="rg-kpi__hint">Plantilla and COS entries visible to your role</span>
+    </div>
+    <div class="rg-kpi">
+        <span class="rg-kpi__label">Branch Handling</span>
+        <strong class="rg-kpi__value">Dual</strong>
+        <span class="rg-kpi__hint">Separate Plantilla and COS entry handling inside one platform</span>
+    </div>
+    <div class="rg-kpi">
+        <span class="rg-kpi__label">Routing Control</span>
+        <strong class="rg-kpi__value">Level-Aware</strong>
+        <span class="rg-kpi__hint">Recorded level remains visible at entry setup</span>
+    </div>
+    <div class="rg-kpi">
+        <span class="rg-kpi__label">Portal Scope</span>
+        <strong class="rg-kpi__value">Internal</strong>
+        <span class="rg-kpi__hint">Entry management stays staff-facing</span>
+    </div>
+</div>
+
+<div class="rg-admin-note mb-4">
+    <strong>Branch-aware entry control</strong>
+    <p>Use this page to maintain intake windows, branch differences, and level-aware routing basis while preserving one shared workflow engine and one database across the system.</p>
+</div>
+
+<div class="rg-table-shell">
+    <div class="table-responsive">
+        <table class="table align-middle">
+            <thead>
+                <tr>
+                    <th>Entry</th>
+                    <th>Position</th>
+                    <th>Branch / Intake</th>
+                    <th>Routing</th>
+                    <th>Status</th>
+                    <th>Schedule</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for entry in entries %}
+                    <tr>
+                        <td>
+                            <strong>{{ entry.job_code }}</strong>
+                            <div class="small text-muted">{{ entry.title }}</div>
+                        </td>
+                        <td>
+                            {% if entry.position_reference %}
+                                <div>{{ entry.position_reference.title }}</div>
+                                <div class="small text-muted">{{ entry.position_reference.position_code }} | {{ entry.unit }}</div>
+                            {% else %}
+                                <div class="text-muted">No linked position reference</div>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div class="d-flex flex-wrap gap-2">
+                                <span class="rg-pill rg-pill--{{ entry.branch|branch_theme }}">{{ entry.get_branch_display }}</span>
+                                <span class="rg-pill rg-pill--info">{{ entry.get_intake_mode_display }}</span>
+                            </div>
+                        </td>
+                        <td><span class="rg-pill rg-pill--{{ entry.level|level_theme }}">{{ entry.get_level_display }}</span></td>
+                        <td><span class="rg-pill rg-pill--{{ entry.status|status_theme }}">{{ entry.get_status_display }}</span></td>
+                        <td>
+                            <div>{{ entry.opening_date|date:"M d, Y" }}</div>
+                            <div class="small text-muted">
+                                {% if entry.closing_date %}to {{ entry.closing_date|date:"M d, Y" }}{% else %}No fixed closing date{% endif %}
+                            </div>
+                        </td>
+                        <td class="text-end">
+                            <div class="d-flex justify-content-end gap-2 flex-wrap">
+                                <a href="{% url 'recruitment-entry-update' entry.pk %}" class="btn btn-outline-secondary btn-sm">Edit</a>
+                                {% if entry.status != "active" %}
+                                    <form method="post" action="{% url 'recruitment-entry-status' entry.pk 'active' %}">
+                                        {% csrf_token %}
+                                        <button type="submit" class="btn btn-outline-success btn-sm">Activate</button>
+                                    </form>
+                                {% endif %}
+                                {% if entry.status != "suspended" and entry.status != "closed" %}
+                                    <form method="post" action="{% url 'recruitment-entry-status' entry.pk 'suspended' %}">
+                                        {% csrf_token %}
+                                        <button type="submit" class="btn btn-outline-warning btn-sm">Suspend</button>
+                                    </form>
+                                {% endif %}
+                                {% if entry.status != "closed" %}
+                                    <form method="post" action="{% url 'recruitment-entry-status' entry.pk 'closed' %}">
+                                        {% csrf_token %}
+                                        <button type="submit" class="btn btn-outline-dark btn-sm">Close</button>
+                                    </form>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="7">
+                            <div class="rg-empty-state">No recruitment entries recorded yet.</div>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

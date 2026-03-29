@@ -1,0 +1,66 @@
+{% extends "internal_base.html" %}
+
+{% block internal_content %}
+<div class="rg-page-header">
+    <div>
+        <p class="rg-eyebrow">Recruitment Entry Management</p>
+        <h1 class="rg-page-title">{% if object %}Update Recruitment Entry{% else %}Create Recruitment Entry{% endif %}</h1>
+        <p class="rg-page-copy">Configure the recruitment entry metadata that drives public intake visibility, branch distinction, and level-aware routing inside the unified internal recruitment administration portal.</p>
+    </div>
+    <div class="rg-page-actions">
+        <a href="{% url 'recruitment-entry-list' %}" class="btn btn-outline-secondary">Back to Entries</a>
+    </div>
+</div>
+
+<div class="rg-admin-note mb-4">
+    <strong>Internal entry setup</strong>
+    <p>Entry configuration remains an internal-only function. Public applicant pages continue to consume these records without exposing internal management controls.</p>
+</div>
+
+<div class="row justify-content-center">
+    <div class="col-xl-10">
+        <div class="card p-4">
+            <form method="post">
+                {% csrf_token %}
+                {% if form.non_field_errors %}
+                    <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+                {% endif %}
+
+                <div class="rg-form-section mb-4">
+                    <h2 class="rg-form-section__title">Entry Identity</h2>
+                    <p class="rg-form-section__copy">Define the linked position, entry code, branch, and routing basis first so the resulting public intake page and internal routing remain clear.</p>
+                    <div class="row g-3">
+                        <div class="col-md-6">{% include "recruitment/includes/form_field.html" with field=form.position_reference %}</div>
+                        <div class="col-md-6">{% include "recruitment/includes/form_field.html" with field=form.job_code %}</div>
+                        <div class="col-md-4">{% include "recruitment/includes/form_field.html" with field=form.branch %}</div>
+                        <div class="col-md-4">{% include "recruitment/includes/form_field.html" with field=form.level %}</div>
+                        <div class="col-md-4">{% include "recruitment/includes/form_field.html" with field=form.status %}</div>
+                    </div>
+                </div>
+
+                <div class="rg-form-section mb-4">
+                    <h2 class="rg-form-section__title">Intake Window</h2>
+                    <p class="rg-form-section__copy">Plantilla must use a fixed period, while COS may use opening-based, continuous, or pooling intake according to the existing rules.</p>
+                    <div class="row g-3">
+                        <div class="col-md-4">{% include "recruitment/includes/form_field.html" with field=form.intake_mode %}</div>
+                        <div class="col-md-4">{% include "recruitment/includes/form_field.html" with field=form.publication_date %}</div>
+                        <div class="col-md-4">{% include "recruitment/includes/form_field.html" with field=form.opening_date %}</div>
+                        <div class="col-md-4">{% include "recruitment/includes/form_field.html" with field=form.closing_date %}</div>
+                    </div>
+                </div>
+
+                <div class="rg-form-section">
+                    <h2 class="rg-form-section__title">Qualification Reference</h2>
+                    <p class="rg-form-section__copy">Use this area for branch-aware qualification or intake notes that should accompany the entry during screening.</p>
+                    {% include "recruitment/includes/form_field.html" with field=form.qualification_reference %}
+                </div>
+
+                <div class="rg-form-actions">
+                    <button type="submit" class="btn btn-rg-primary">Save Entry</button>
+                    <a href="{% url 'recruitment-entry-list' %}" class="btn btn-outline-secondary">Cancel</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,262 @@
+{% extends "internal_base.html" %}
+{% load recruitment_ui %}
+
+{% block internal_content %}
+<div class="rg-page-header">
+    <div>
+        <p class="rg-eyebrow">Internal Operations</p>
+        <h1 class="rg-page-title">Operations Dashboard</h1>
+        <p class="rg-page-copy">Institutional workspace for staff-facing recruitment operations, entry administration, case handling, and controlled records under one shared workflow engine.</p>
+    </div>
+    <div class="rg-page-actions">
+        {% if request.user.role == "system_admin" %}
+            <a href="{% url 'internal-user-list' %}" class="btn btn-rg-primary">Manage Internal Users</a>
+            <a href="{% url 'recruitment-entry-list' %}" class="btn btn-outline-secondary">Manage Entries</a>
+        {% elif request.user.role == "secretariat" or request.user.role == "hrm_chief" %}
+            <a href="{% url 'recruitment-entry-list' %}" class="btn btn-rg-primary">Manage Entries</a>
+            <a href="{% url 'workflow-queue' %}" class="btn btn-outline-secondary">My Queue</a>
+        {% else %}
+            <a href="{% url 'workflow-queue' %}" class="btn btn-rg-primary">My Queue</a>
+        {% endif %}
+    </div>
+</div>
+
+{% if request.user.role == "system_admin" %}
+    <div class="rg-kpi-grid mb-4">
+        <div class="rg-kpi">
+            <span class="rg-kpi__label">Internal Accounts</span>
+            <strong class="rg-kpi__value">{{ internal_user_count }}</strong>
+            <span class="rg-kpi__hint">Registered internal users in the locked actor set</span>
+        </div>
+        <div class="rg-kpi">
+            <span class="rg-kpi__label">Active Accounts</span>
+            <strong class="rg-kpi__value">{{ active_internal_user_count }}</strong>
+            <span class="rg-kpi__hint">Currently enabled internal accounts</span>
+        </div>
+        <div class="rg-kpi">
+            <span class="rg-kpi__label">Visible Open Entries</span>
+            <strong class="rg-kpi__value">{{ positions|length }}</strong>
+            <span class="rg-kpi__hint">Current reference entries visible in the portal</span>
+        </div>
+        <div class="rg-kpi">
+            <span class="rg-kpi__label">Access Boundary</span>
+            <strong class="rg-kpi__value">Restricted</strong>
+            <span class="rg-kpi__hint">Recruitment case content is not visible by default</span>
+        </div>
+    </div>
+
+    <div class="rg-admin-note mb-4">
+        <strong>Administrative boundary</strong>
+        <p>System Administration remains limited to identity, access, and controlled platform configuration. Recruitment case content stays server-side restricted unless explicitly permitted by system rules.</p>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-lg-7">
+            <div class="card p-4 h-100">
+                <div class="rg-section__header">
+                    <div>
+                        <p class="rg-eyebrow">Identity and Access</p>
+                        <h2 class="h4 mb-1">Recent Identity Events</h2>
+                        <p class="rg-section-copy">Account creation, updates, role changes, and activation status changes.</p>
+                    </div>
+                    <a href="{% url 'internal-user-list' %}" class="btn btn-outline-secondary btn-sm">Open User Directory</a>
+                </div>
+                {% if recent_identity_logs %}
+                    <div class="rg-list-stack">
+                        {% for entry in recent_identity_logs %}
+                            <article class="rg-record">
+                                <div class="rg-record__header">
+                                    <strong>{{ entry.get_action_display }}</strong>
+                                    <span class="rg-note">{{ entry.created_at|date:"M d, Y H:i" }}</span>
+                                </div>
+                                <p class="mb-0">{{ entry.description }}</p>
+                            </article>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="rg-empty-state">No identity events recorded yet.</div>
+                {% endif %}
+            </div>
+        </div>
+        <div class="col-lg-5">
+            <div class="card p-4 h-100">
+                <p class="rg-eyebrow">System Boundary</p>
+                <div class="rg-step-list">
+                    <div class="rg-step">
+                        <strong>System Administrator scope</strong>
+                        <p>Identity, account administration, and controlled system-level functions remain available without default recruitment case visibility.</p>
+                    </div>
+                    <div class="rg-step">
+                        <strong>Shared infrastructure</strong>
+                        <p>The internal and applicant portals still use one platform, one database, and one workflow engine.</p>
+                    </div>
+                    <div class="rg-step">
+                        <strong>Locked routing rules</strong>
+                        <p>Level 1 continues to route to Secretariat and Level 2 continues to route to HRM Chief unless an explicit audited override exists.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+{% else %}
+    <div class="rg-kpi-grid mb-4">
+        <div class="rg-kpi">
+            <span class="rg-kpi__label">Assigned Queue</span>
+            <strong class="rg-kpi__value">{{ queue|length }}</strong>
+            <span class="rg-kpi__hint">Applications currently routed to your role</span>
+        </div>
+        <div class="rg-kpi">
+            <span class="rg-kpi__label">Visible Open Entries</span>
+            <strong class="rg-kpi__value">{{ positions|length }}</strong>
+            <span class="rg-kpi__hint">Recruitment entries currently visible in the portal</span>
+        </div>
+        <div class="rg-kpi">
+            <span class="rg-kpi__label">Current Role</span>
+            <strong class="rg-kpi__value">{{ request.user.get_role_display }}</strong>
+            <span class="rg-kpi__hint">Staff-facing workspace for your assigned function</span>
+        </div>
+        <div class="rg-kpi">
+            <span class="rg-kpi__label">Portal Boundary</span>
+            <strong class="rg-kpi__value">Internal</strong>
+            <span class="rg-kpi__hint">Public applicant functions remain outside this portal</span>
+        </div>
+    </div>
+
+    <div class="rg-admin-note mb-4">
+        <strong>Operational boundary</strong>
+        <p>Cases, workflow routing, evaluation records, evidence handling, and exports remain internal-only. Public applicant intake, OTP verification, receipt, and status lookup stay outside this workspace.</p>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-lg-7">
+            <div class="card p-4 h-100">
+                <div class="rg-section__header">
+                    <div>
+                        <p class="rg-eyebrow">Workflow</p>
+                        <h2 class="h4 mb-1">Assigned Queue</h2>
+                        <p class="rg-section-copy">Applications currently routed to your role under the shared workflow engine.</p>
+                    </div>
+                    <a href="{% url 'workflow-queue' %}" class="btn btn-rg-primary btn-sm">Open Queue</a>
+                </div>
+                {% if queue %}
+                    <div class="rg-list-stack">
+                        {% for application in queue|slice:":5" %}
+                            <a href="{% url 'application-detail' application.pk %}" class="text-decoration-none">
+                                <article class="rg-list-item">
+                                    <div class="rg-list-item__header">
+                                        <div>
+                                            <h3 class="rg-list-item__title">{{ application.reference_label }}</h3>
+                                            <p class="mb-0 rg-note">{{ application.position.title }} | {{ application.position.job_code }}</p>
+                                        </div>
+                                        <span class="rg-pill rg-pill--{{ application.status|status_theme }}">{{ application.get_status_display }}</span>
+                                    </div>
+                                    <div class="rg-list-item__meta">
+                                        <span class="rg-pill rg-pill--{{ application.branch|branch_theme }}">{{ application.get_branch_display }}</span>
+                                        <span class="rg-pill rg-pill--{{ application.level|level_theme }}">{{ application.get_level_display }}</span>
+                                        {% if application.current_handler_role %}
+                                            <span class="rg-pill rg-pill--{{ application.current_handler_role|role_theme }}">{{ application.current_handler_role|role_label }}</span>
+                                        {% endif %}
+                                    </div>
+                                    <p class="mb-0 rg-note">Updated {{ application.updated_at|date:"M d, Y H:i" }}</p>
+                                </article>
+                            </a>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="rg-empty-state">No applications are currently routed to your role.</div>
+                {% endif %}
+            </div>
+        </div>
+        <div class="col-lg-5">
+            <div class="card p-4 mb-4">
+                <p class="rg-eyebrow">Portal Boundaries</p>
+                <div class="rg-step-list">
+                    <div class="rg-step">
+                        <strong>Public Applicant Portal</strong>
+                        <p>Submission, OTP verification, receipt, and status lookup remain under the public <code>/apply/</code> space.</p>
+                    </div>
+                    <div class="rg-step">
+                        <strong>Internal Portal</strong>
+                        <p>Workflow, evaluation, decision, records, and export remain staff-facing and require authenticated access.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="card p-4 h-100">
+                <div class="rg-section__header">
+                    <div>
+                        <p class="rg-eyebrow">Internal Reference</p>
+                        <h2 class="h4 mb-1">Open Recruitment Entries</h2>
+                        <p class="rg-section-copy">Quick reference for the entries currently visible in the internal portal.</p>
+                    </div>
+                    <a href="{% url 'position-list' %}" class="btn btn-outline-secondary btn-sm">Open Entries</a>
+                </div>
+                {% if positions %}
+                    <div class="rg-list-stack">
+                        {% for position in positions|slice:":4" %}
+                            <article class="rg-record">
+                                <div class="rg-record__header">
+                                    <div>
+                                        <strong>{{ position.title }}</strong>
+                                        <p class="mb-0 rg-note">{{ position.job_code }} | {{ position.unit }}</p>
+                                    </div>
+                                    <span class="rg-pill rg-pill--{{ position.branch|branch_theme }}">{{ position.get_branch_display }}</span>
+                                </div>
+                                <div class="rg-list-item__meta">
+                                    <span class="rg-pill rg-pill--{{ position.level|level_theme }}">{{ position.get_level_display }}</span>
+                                    <span class="rg-pill rg-pill--info">{{ position.get_intake_mode_display }}</span>
+                                </div>
+                                <p class="mb-0 rg-note">{% if position.closing_date %}Open until {{ position.closing_date|date:"M d, Y" }}{% else %}Intake remains open while the entry is active.{% endif %}</p>
+                            </article>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="rg-empty-state">No active recruitment entries found.</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+{% endif %}
+
+<section class="mt-4">
+    <div class="rg-section__header">
+        <div>
+            <p class="rg-eyebrow">Internal Module Surface</p>
+            <h2 class="h4 mb-1">Unified operational architecture</h2>
+            <p class="rg-section-copy">The internal layout now supports the full staff-facing module structure even where some modules still share current case pages or await separate implementation.</p>
+        </div>
+    </div>
+
+    <div class="rg-module-grid">
+        <article class="rg-module-card">
+            <h3 class="rg-module-card__title">Screening / Evaluation</h3>
+            <p class="rg-module-card__copy">Qualification screening, completeness review, and evaluator notes are handled within protected case pages for authorized workflow staff.</p>
+            <span class="rg-pill rg-pill--info rg-module-card__meta">Active in case pages</span>
+        </article>
+        <article class="rg-module-card">
+            <h3 class="rg-module-card__title">Examination</h3>
+            <p class="rg-module-card__copy">Branch-aware examination recording, waivers, and finalization remain available as operational controls within case handling.</p>
+            <span class="rg-pill rg-pill--info rg-module-card__meta">Active in case pages</span>
+        </article>
+        <article class="rg-module-card">
+            <h3 class="rg-module-card__title">Interview / Ratings</h3>
+            <p class="rg-module-card__copy">Interview scheduling, authorized evaluator ratings, fallback uploads, and finalized lock behavior now operate directly within protected case pages.</p>
+            <span class="rg-pill rg-pill--info rg-module-card__meta">Active in case pages</span>
+        </article>
+        <article class="rg-module-card">
+            <h3 class="rg-module-card__title">Deliberation / Decision Support</h3>
+            <p class="rg-module-card__copy">Branch-aware deliberation records, consolidated outputs, ranking support, and Plantilla Comparative Assessment Reports now feed the decision path inside the same workflow engine.</p>
+            <span class="rg-pill rg-pill--info rg-module-card__meta">Active in case pages</span>
+        </article>
+        <article class="rg-module-card">
+            <h3 class="rg-module-card__title">Evidence Vault / Audit / Export</h3>
+            <p class="rg-module-card__copy">Encrypted records, routing history, case timelines, and controlled export remain part of the internal case workspace and role-based approval flow.</p>
+            <span class="rg-pill rg-pill--success rg-module-card__meta">Operational</span>
+        </article>
+        <article class="rg-module-card">
+            <h3 class="rg-module-card__title">System Administration</h3>
+            <p class="rg-module-card__copy">Internal account administration, password control, and role-based access oversight remain separated from public applicant functions and protected case content.</p>
+            <span class="rg-pill rg-pill--{% if request.user.role == 'system_admin' %}success{% else %}neutral{% endif %} rg-module-card__meta">{% if request.user.role == 'system_admin' %}Available{% else %}Restricted by role{% endif %}</span>
+        </article>
+    </div>
+</section>
+{% endblock %}

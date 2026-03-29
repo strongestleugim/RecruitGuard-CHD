@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}Applicant Portal | RecruitGuard-CHD{% endblock %}
+{% block body_class %}applicant-portal-body{% endblock %}
+
+{% block theme_styles %}
+:root {
+    --rg-primary: #005a87;
+    --rg-primary-strong: #004d72;
+    --rg-secondary: #eef2f4;
+    --rg-accent: #8c6b00;
+    --rg-surface: #f5f6f7;
+}
+{% endblock %}
+
+{% block body_background %}
+background: #f5f6f7;
+{% endblock %}
+
+{% block extra_styles %}
+.text-rg-primary {
+    color: var(--rg-primary) !important;
+}
+{% endblock %}
+
+{% block site_header %}
+<header class="rg-topbar rg-public-topbar">
+    <div class="rg-container rg-topbar__inner rg-public-topbar__inner">
+        <div class="rg-topbar__group">
+            <a class="rg-brand rg-public-brand" href="{% url 'applicant-portal' %}">
+                <span class="rg-brand-copy">
+                    <span class="rg-brand-kicker">Department of Health - CHD CALABARZON</span>
+                    <span class="rg-brand-title">RecruitGuard-CHD Applicant Portal</span>
+                </span>
+            </a>
+        </div>
+    </div>
+</header>
+{% endblock %}

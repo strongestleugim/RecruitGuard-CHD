@@ -1,0 +1,62 @@
+{% extends "internal_base.html" %}
+{% load static %}
+
+{% block internal_content %}
+<div class="rg-auth-shell">
+    <div class="rg-auth-grid">
+        <div class="card rg-auth-panel">
+            <div class="mb-4">
+                <p class="rg-eyebrow">Internal Access</p>
+                <h1 class="rg-page-title mb-2">RecruitGuard-CHD Internal Login</h1>
+                <p class="rg-page-copy">Use your assigned internal account to access the staff-only workspace for workflow routing, case review, records control, and role-based recruitment administration.</p>
+            </div>
+            <form method="post">
+                {% csrf_token %}
+                {% if form.non_field_errors %}
+                    <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+                {% endif %}
+                <div class="rg-form-grid">
+                    {% include "recruitment/includes/form_field.html" with field=form.username %}
+                    {% include "recruitment/includes/form_field.html" with field=form.password %}
+                </div>
+                <div class="rg-form-actions">
+                    <button type="submit" class="btn btn-rg-primary w-100">Sign In</button>
+                </div>
+            </form>
+            <div class="rg-form-actions mt-3">
+                <a href="{% url 'applicant-portal' %}" class="btn btn-outline-secondary">Open Applicant Portal</a>
+                <a href="{% url 'applicant-status-lookup' %}" class="btn btn-outline-secondary">Check Submission Status</a>
+            </div>
+        </div>
+
+        <aside class="rg-surface rg-auth-side">
+            <div class="rg-auth-media">
+                <img src="{% static 'img/doh-chd-banner.jpg' %}" alt="DOH-CHD CALABARZON banner">
+            </div>
+            <div>
+                <p class="rg-eyebrow">Portal Boundary</p>
+                <h2 class="h2 mb-3">Institutional staff workspace for the shared recruitment engine.</h2>
+                <p class="rg-note">Internal access remains separate from the public applicant portal while still using the same backend, one database, and one workflow engine for Plantilla and COS recruitment.</p>
+            </div>
+            <div class="rg-step-list">
+                <div class="rg-auth-side__panel">
+                    <strong>Protected internal roles only</strong>
+                    <p class="mb-0 rg-note">Secretariat, HRM Chief, HRMPSB Member, Appointing Authority, and System Administrator accounts use this sign-in page.</p>
+                </div>
+                <div class="rg-auth-side__panel">
+                    <strong>Level-aware routing remains enforced</strong>
+                    <p class="mb-0 rg-note">Level 1 routes to Secretariat, while Level 2 routes to HRM Chief unless a controlled override is explicitly granted and logged.</p>
+                </div>
+                <div class="rg-auth-side__panel">
+                    <strong>Applicant functions stay public-facing</strong>
+                    <p class="mb-0 rg-note">Public submission, OTP verification, receipt, and status lookup remain under the separate applicant portal.</p>
+                </div>
+                <div class="rg-auth-side__panel">
+                    <strong>Operational module surface</strong>
+                    <p class="mb-0 rg-note">The internal workspace supports dashboard, case handling, workflow routing, evaluation records, evidence controls, audit visibility, export, and system administration under one institutional layout.</p>
+                </div>
+            </div>
+        </aside>
+    </div>
+</div>
+{% endblock %}

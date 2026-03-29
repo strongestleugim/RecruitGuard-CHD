@@ -1,0 +1,62 @@
+{% extends "internal_base.html" %}
+
+{% block internal_content %}
+<div class="rg-page-header">
+    <div>
+        <p class="rg-eyebrow">Recruitment Entry Management</p>
+        <h1 class="rg-page-title">Position Catalog</h1>
+        <p class="rg-page-copy">Reference positions reused by Plantilla and COS recruitment entries inside the shared internal recruitment administration workspace.</p>
+    </div>
+    <div class="rg-page-actions">
+        <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary">Dashboard</a>
+        <a href="{% url 'recruitment-entry-list' %}" class="btn btn-outline-secondary">View Entries</a>
+        <a href="{% url 'position-catalog-create' %}" class="btn btn-rg-primary">New Position</a>
+    </div>
+</div>
+
+<div class="rg-admin-note mb-4">
+    <strong>Shared catalog control</strong>
+    <p>Position references stay centralized here so public intake, internal case handling, and branch-aware recruitment entries all draw from the same authoritative records.</p>
+</div>
+
+<div class="rg-table-shell">
+    <div class="table-responsive">
+        <table class="table align-middle">
+            <thead>
+                <tr>
+                    <th>Code</th>
+                    <th>Title</th>
+                    <th>Unit</th>
+                    <th>Status</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for position in positions %}
+                    <tr>
+                        <td><strong>{{ position.position_code }}</strong></td>
+                        <td>{{ position.title }}</td>
+                        <td>{{ position.unit }}</td>
+                        <td>
+                            {% if position.is_active %}
+                                <span class="rg-pill rg-pill--success">Active</span>
+                            {% else %}
+                                <span class="rg-pill rg-pill--neutral">Inactive</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end">
+                            <a href="{% url 'position-catalog-update' position.pk %}" class="btn btn-outline-secondary btn-sm">Edit</a>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="5">
+                            <div class="rg-empty-state">No positions recorded yet.</div>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

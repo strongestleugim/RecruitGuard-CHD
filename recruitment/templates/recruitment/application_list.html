@@ -1,0 +1,100 @@
+{% extends "internal_base.html" %}
+{% load recruitment_ui %}
+
+{% block internal_content %}
+<div class="rg-page-header">
+    <div>
+        <p class="rg-eyebrow">{% if is_queue %}Workflow Operations{% else %}Case Registry{% endif %}</p>
+        <h1 class="rg-page-title">{% if is_queue %}Assigned Queue{% else %}Accessible Applications{% endif %}</h1>
+        <p class="rg-page-copy">{% if is_queue %}Applications currently routed to your role under the internal workflow engine, with routing still enforced by branch and recorded level classification.{% else %}Applications available to your current internal permissions inside the staff-only operational portal.{% endif %}</p>
+    </div>
+    <div class="rg-page-actions">
+        <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary">Dashboard</a>
+        <a href="{% url 'workflow-queue' %}" class="btn btn-rg-primary">Open Queue</a>
+    </div>
+</div>
+
+<div class="rg-kpi-grid mb-4">
+    <div class="rg-kpi">
+        <span class="rg-kpi__label">Visible Records</span>
+        <strong class="rg-kpi__value">{{ applications|length }}</strong>
+        <span class="rg-kpi__hint">Applications shown on this page</span>
+    </div>
+    <div class="rg-kpi">
+        <span class="rg-kpi__label">Routing View</span>
+        <strong class="rg-kpi__value">{% if is_queue %}Assigned{% else %}Accessible{% endif %}</strong>
+        <span class="rg-kpi__hint">Current application listing mode</span>
+    </div>
+    <div class="rg-kpi">
+        <span class="rg-kpi__label">Portal Scope</span>
+        <strong class="rg-kpi__value">Internal</strong>
+        <span class="rg-kpi__hint">Public intake remains outside this workspace</span>
+    </div>
+    <div class="rg-kpi">
+        <span class="rg-kpi__label">Routing Rules</span>
+        <strong class="rg-kpi__value">Level-Aware</strong>
+        <span class="rg-kpi__hint">Level 1 to Secretariat, Level 2 to HRM Chief</span>
+    </div>
+</div>
+
+<div class="rg-admin-note mb-4">
+    <strong>{% if is_queue %}Queue handling{% else %}Case visibility{% endif %}</strong>
+    <p>{% if is_queue %}Use this listing for role-assigned workflow handling, then open a case to record screening, examination, evidence, audit, and decision actions inside one protected internal workspace.{% else %}This listing reflects what your role can currently access. Detailed evaluation, records, and workflow actions remain available only inside authorized case pages.{% endif %}</p>
+</div>
+
+<div class="rg-table-shell">
+    <div class="table-responsive">
+        <table class="table align-middle">
+            <thead>
+                <tr>
+                    <th>Application</th>
+                    <th>Position</th>
+                    <th>Branch / Level</th>
+                    <th>Status</th>
+                    <th>Current Handler</th>
+                    <th>Updated</th>
+                    <th class="text-end">Open</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for application in applications %}
+                    <tr>
+                        <td>
+                            <strong>{{ application.reference_label }}</strong>
+                            <div class="small text-muted">{{ application.applicant_display_name }}</div>
+                        </td>
+                        <td>
+                            <div>{{ application.position.title }}</div>
+                            <div class="small text-muted">{{ application.position.job_code }} | {{ application.position.get_intake_mode_display }}</div>
+                        </td>
+                        <td>
+                            <div class="d-flex flex-wrap gap-2">
+                                <span class="rg-pill rg-pill--{{ application.branch|branch_theme }}">{{ application.get_branch_display }}</span>
+                                <span class="rg-pill rg-pill--{{ application.level|level_theme }}">{{ application.get_level_display }}</span>
+                            </div>
+                        </td>
+                        <td><span class="rg-pill rg-pill--{{ application.status|status_theme }}">{{ application.get_status_display }}</span></td>
+                        <td>
+                            {% if application.current_handler_role %}
+                                <span class="rg-pill rg-pill--{{ application.current_handler_role|role_theme }}">{{ application.current_handler_role|role_label }}</span>
+                            {% else %}
+                                <span class="rg-pill rg-pill--neutral">Closed</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ application.updated_at|date:"M d, Y H:i" }}</td>
+                        <td class="text-end">
+                            <a href="{% url 'application-detail' application.pk %}" class="btn btn-outline-secondary btn-sm">View Case</a>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="7">
+                            <div class="rg-empty-state">No records found.</div>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

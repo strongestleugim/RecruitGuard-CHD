@@ -1,0 +1,68 @@
+{% extends "applicant_base.html" %}
+{% load recruitment_ui %}
+
+{% block content %}
+<div class="rg-page-header">
+    <div>
+        <p class="rg-eyebrow">Submission Status</p>
+        <h1 class="rg-page-title">Lookup Application</h1>
+        <p class="rg-page-copy">Enter the issued Application ID and the applicant email address used during submission to view the latest recorded status.</p>
+    </div>
+</div>
+
+<div class="row g-4 justify-content-center">
+    <div class="col-lg-5">
+        <div class="card p-4 h-100">
+            <p class="rg-eyebrow">Lookup Form</p>
+            <form method="post">
+                {% csrf_token %}
+                {% if form.non_field_errors %}
+                    <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+                {% endif %}
+                <div class="rg-form-grid">
+                    {% include "recruitment/includes/form_field.html" with field=form.application_id %}
+                    {% include "recruitment/includes/form_field.html" with field=form.email %}
+                </div>
+                <div class="rg-form-actions">
+                    <button type="submit" class="btn btn-rg-primary">Check Status</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <div class="col-lg-5">
+        <div class="card p-4 h-100">
+            <p class="rg-eyebrow">Current Result</p>
+            {% if application %}
+                <div class="d-flex flex-wrap gap-2 mb-3">
+                    <span class="rg-pill rg-pill--{{ application.branch|branch_theme }}">{{ application.get_branch_display }}</span>
+                    <span class="rg-pill rg-pill--{{ application.status|status_theme }}">{{ application.get_status_display }}</span>
+                </div>
+                <div class="rg-info-list">
+                    <div class="rg-info-row">
+                        <div class="rg-info-row__label">Application ID</div>
+                        <div class="rg-info-row__value">{{ application.reference_number }}</div>
+                    </div>
+                    <div class="rg-info-row">
+                        <div class="rg-info-row__label">Applicant</div>
+                        <div class="rg-info-row__value">{{ application.applicant_display_name }}</div>
+                    </div>
+                    <div class="rg-info-row">
+                        <div class="rg-info-row__label">Position</div>
+                        <div class="rg-info-row__value">{{ application.position.title }}</div>
+                    </div>
+                    <div class="rg-info-row">
+                        <div class="rg-info-row__label">Routing Basis</div>
+                        <div class="rg-info-row__value">{{ application.get_level_display }}</div>
+                    </div>
+                    <div class="rg-info-row">
+                        <div class="rg-info-row__label">Submitted At</div>
+                        <div class="rg-info-row__value">{{ application.submitted_at|date:"M d, Y H:i" }}</div>
+                    </div>
+                </div>
+            {% else %}
+                <div class="rg-empty-state">Enter your Application ID and email address to view the latest recorded submission status.</div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

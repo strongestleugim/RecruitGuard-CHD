@@ -1,0 +1,116 @@
+from django.contrib import messages
+from django.contrib.auth.mixins import LoginRequiredMixin
+from django.shortcuts import get_object_or_404, redirect
+from django.urls import reverse
+from django.views import View
+from django.views.generic import CreateView, ListView, UpdateView
+
+from .forms import PositionForm, RecruitmentEntryForm
+from .models import Position, PositionPosting
+from .permissions import EntryManagerRequiredMixin
+from .services import (
+    get_manageable_positions,
+    get_manageable_recruitment_entries,
+    persist_position,
+    persist_recruitment_entry,
+    update_recruitment_entry_status,
+)
+
+
+class PositionCatalogListView(LoginRequiredMixin, EntryManagerRequiredMixin, ListView):
+    template_name = "recruitment/position_catalog_list.html"
+    context_object_name = "positions"
+
+    def get_queryset(self):
+        return get_manageable_positions(self.request.user)
+
+
+class PositionCatalogCreateView(LoginRequiredMixin, EntryManagerRequiredMixin, CreateView):
+    template_name = "recruitment/position_catalog_form.html"
+    model = Position
+    form_class = PositionForm
+
+    def form_valid(self, form):
+        self.object = persist_position(
+            position=form.save(commit=False),
+            actor=self.request.user,
+            changed_fields=form.changed_data,
+        )
+        messages.success(self.request, "Position catalog record created.")
+        return redirect(self.get_success_url())
+
+    def get_success_url(self):
+        return reverse("position-catalog-list")
+
+
+class PositionCatalogUpdateView(LoginRequiredMixin, EntryManagerRequiredMixin, UpdateView):
+    template_name = "recruitment/position_catalog_form.html"
+    model = Position
+    form_class = PositionForm
+
+    def form_valid(self, form):
+        self.object = persist_position(
+            position=form.save(commit=False),
+            actor=self.request.user,
+            changed_fields=form.changed_data,
+        )
+        messages.success(self.request, "Position catalog record updated.")
+        return redirect(self.get_success_url())
+
+    def get_success_url(self):
+        return reverse("position-catalog-list")
+
+
+class RecruitmentEntryListView(LoginRequiredMixin, EntryManagerRequiredMixin, ListView):
+    template_name = "recruitment/recruitment_entry_list.html"
+    context_object_name = "entries"
+
+    def get_queryset(self):
+        return get_manageable_recruitment_entries(self.request.user)
+
+
+class RecruitmentEntryCreateView(LoginRequiredMixin, EntryManagerRequiredMixin, CreateView):
+    template_name = "recruitment/recruitment_entry_form.html"
+    model = PositionPosting
+    form_class = RecruitmentEntryForm
+
+    def form_valid(self, form):
+        self.object = persist_recruitment_entry(
+            entry=form.save(commit=False),
+            actor=self.request.user,
+            changed_fields=form.changed_data,
+        )
+        messages.success(self.request, "Recruitment entry created.")
+        return redirect(self.get_success_url())
+
+    def get_success_url(self):
+        return reverse("recruitment-entry-list")
+
+
+class RecruitmentEntryUpdateView(LoginRequiredMixin, EntryManagerRequiredMixin, UpdateView):
+    template_name = "recruitment/recruitment_entry_form.html"
+    model = PositionPosting
+    form_class = RecruitmentEntryForm
+
+    def form_valid(self, form):
+        self.object = persist_recruitment_entry(
+            entry=form.save(commit=False),
+            actor=self.request.user,
+            changed_fields=form.changed_data,
+        )
+        messages.success(self.request, "Recruitment entry updated.")
+        return redirect(self.get_success_url())
+
+    def get_success_url(self):
+        return reverse("recruitment-entry-list")
+
+
+class RecruitmentEntryStatusUpdateView(LoginRequiredMixin, EntryManagerRequiredMixin, View):
+    def post(self, request, pk, status):
+        entry = get_object_or_404(PositionPosting, pk=pk)
+        if status not in PositionPosting.EntryStatus.values:
+            messages.error(request, "Invalid entry status.")
+            return redirect("recruitment-entry-list")
+        update_recruitment_entry_status(entry, request.user, status)
+        messages.success(request, f"Recruitment entry status updated to {entry.get_status_display()}.")
+        return redirect("recruitment-entry-list")

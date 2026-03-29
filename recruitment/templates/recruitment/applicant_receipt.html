@@ -1,0 +1,79 @@
+{% extends "applicant_base.html" %}
+{% load recruitment_ui %}
+
+{% block content %}
+<div class="rg-page-header">
+    <div>
+        <p class="rg-eyebrow">Submission Receipt</p>
+        <h1 class="rg-page-title">{{ application.reference_number }}</h1>
+        <p class="rg-page-copy">Your application has been finalized and routed into the recruitment workflow. Keep this reference number for later status lookup.</p>
+    </div>
+    <div class="rg-header-stats">
+        <div class="rg-stat-chip">
+            <strong>{{ application.get_branch_display }}</strong>
+            <span>Recruitment Branch</span>
+        </div>
+        <div class="rg-stat-chip">
+            <strong>{{ application.get_status_display }}</strong>
+            <span>Recorded Status</span>
+        </div>
+    </div>
+</div>
+
+<div class="rg-receipt-grid">
+    <div class="rg-receipt-main">
+        <div class="card p-4">
+            <div class="alert alert-success">Your application has been finalized and routed into the recruitment workflow.</div>
+            <div class="rg-info-list">
+                <div class="rg-info-row">
+                    <div class="rg-info-row__label">Applicant</div>
+                    <div class="rg-info-row__value">{{ application.applicant_display_name }}</div>
+                </div>
+                <div class="rg-info-row">
+                    <div class="rg-info-row__label">Email</div>
+                    <div class="rg-info-row__value">{{ application.applicant_email }}</div>
+                </div>
+                <div class="rg-info-row">
+                    <div class="rg-info-row__label">Position</div>
+                    <div class="rg-info-row__value">{{ application.position.title }} ({{ application.position.job_code }})</div>
+                </div>
+                <div class="rg-info-row">
+                    <div class="rg-info-row__label">Branch</div>
+                    <div class="rg-info-row__value"><span class="rg-pill rg-pill--{{ application.branch|branch_theme }}">{{ application.get_branch_display }}</span></div>
+                </div>
+                <div class="rg-info-row">
+                    <div class="rg-info-row__label">Routing Basis</div>
+                    <div class="rg-info-row__value"><span class="rg-pill rg-pill--{{ application.level|level_theme }}">{{ application.get_level_display }}</span></div>
+                </div>
+                <div class="rg-info-row">
+                    <div class="rg-info-row__label">Submitted At</div>
+                    <div class="rg-info-row__value">{{ application.submitted_at|date:"M d, Y H:i" }}</div>
+                </div>
+            </div>
+            <div class="rg-form-actions">
+                <a href="{% url 'applicant-status-lookup' %}" class="btn btn-rg-primary">Check Status</a>
+                <a href="{% url 'applicant-portal' %}" class="btn btn-outline-secondary">Back to Portal</a>
+            </div>
+        </div>
+    </div>
+    <div class="rg-receipt-side">
+        <div class="card p-4">
+            <p class="rg-eyebrow">Next Step</p>
+            <div class="rg-step-list">
+                <div class="rg-step">
+                    <strong>Save the Application ID</strong>
+                    <p>{{ application.reference_number }} is the identifier used for public status lookup.</p>
+                </div>
+                <div class="rg-step">
+                    <strong>Use the same email address</strong>
+                    <p>Status lookup requires the submitted Application ID and the same applicant email address.</p>
+                </div>
+                <div class="rg-step">
+                    <strong>Wait for internal handling</strong>
+                    <p>The case now proceeds under the shared internal workflow according to the recorded branch and level.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

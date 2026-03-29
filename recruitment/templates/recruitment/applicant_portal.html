@@ -1,0 +1,157 @@
+{% extends "applicant_base.html" %}
+
+{% block main_class %}py-4{% endblock %}
+
+{% block content %}
+<div class="rg-container rg-public-page">
+    <section class="rg-public-intro" aria-labelledby="portal-heading">
+        <div class="rg-public-intro__body">
+            <h1 class="rg-public-intro__title" id="portal-heading">Official Recruitment Application Portal</h1>
+            <p class="rg-public-intro__copy">This portal is used for public submission of applications to current DOH-CHD CALABARZON recruitment entries. Applicants may proceed through the appropriate Plantilla or Contract of Service path, complete OTP verification, and use the issued Application ID to check submission status.</p>
+        </div>
+        <div class="rg-public-intro__actions">
+            <a href="#application-paths" class="btn btn-rg-primary">Start New Application</a>
+            <a href="{% url 'applicant-status-lookup' %}" class="btn btn-outline-secondary">Check Status</a>
+        </div>
+    </section>
+
+    <section class="rg-public-guidance" aria-label="Applicant guidance">
+        <article class="rg-public-guidance__item">
+            <h2 class="rg-public-guidance__title">Portal Purpose</h2>
+            <p class="rg-public-guidance__copy">Submit applications only for currently advertised recruitment entries. Review the correct branch and entry details before proceeding.</p>
+        </article>
+        <article class="rg-public-guidance__item">
+            <h2 class="rg-public-guidance__title">Before Submission</h2>
+            <p class="rg-public-guidance__copy">Prepare all required information and supporting documents. Final submission is accepted only after successful OTP verification.</p>
+        </article>
+        <article class="rg-public-guidance__item">
+            <h2 class="rg-public-guidance__title">After Submission</h2>
+            <p class="rg-public-guidance__copy">Keep the generated Application ID. Use the Status Lookup page to view the latest recorded submission state.</p>
+        </article>
+    </section>
+
+    <section class="rg-public-section" id="application-paths" aria-labelledby="application-paths-heading">
+        <div class="rg-public-section__header">
+            <h2 class="rg-public-section__title" id="application-paths-heading">Available Openings and Application Paths</h2>
+            <p class="rg-public-section__copy">Select the correct recruitment path before applying. Plantilla and Contract of Service entries are maintained separately and may have different intake conditions.</p>
+        </div>
+
+        <div class="rg-public-panel-grid">
+            <section class="rg-public-panel" aria-labelledby="plantilla-heading">
+                <div class="rg-public-panel__header">
+                    <div>
+                        <h3 class="rg-public-panel__title" id="plantilla-heading">Plantilla Recruitment</h3>
+                        <p class="rg-public-panel__copy">Permanent positions under the stricter policy-aware recruitment path.</p>
+                    </div>
+                    <p class="rg-public-panel__count">{{ plantilla_entries|length }} open position{{ plantilla_entries|length|pluralize }}</p>
+                </div>
+
+                <div class="rg-public-panel__body">
+                    {% if plantilla_entries %}
+                        {% for entry in plantilla_entries %}
+                            <article class="rg-public-opening rg-public-opening--plantilla">
+                                <div class="rg-public-opening__top">
+                                    <div>
+                                        <h4 class="rg-public-opening__title">{{ entry.title }}</h4>
+                                        <p class="rg-public-opening__code">Position Code: {{ entry.job_code|default:"Not specified" }}</p>
+                                    </div>
+                                    <a href="{% url 'applicant-intake' entry.pk %}" class="btn btn-rg-primary">Apply Now</a>
+                                </div>
+
+                                <div class="rg-public-opening__meta">
+                                    <div class="rg-public-opening__meta-item">
+                                        <span>Office/Unit</span>
+                                        <strong>{{ entry.unit|default:"Not specified" }}</strong>
+                                    </div>
+                                    <div class="rg-public-opening__meta-item">
+                                        <span>Routing Basis</span>
+                                        <strong>{{ entry.get_level_display }}</strong>
+                                    </div>
+                                    <div class="rg-public-opening__meta-item">
+                                        <span>Intake Type</span>
+                                        <strong>{{ entry.get_intake_mode_display }}</strong>
+                                    </div>
+                                    <div class="rg-public-opening__meta-item">
+                                        <span>Closing Date</span>
+                                        <strong>{% if entry.closing_date %}{{ entry.closing_date|date:"F d, Y" }}{% else %}Open while active{% endif %}</strong>
+                                    </div>
+                                </div>
+
+                                <div class="rg-public-opening__notes">
+                                    <span>Position Details</span>
+                                    <p>{{ entry.description|default:"Position details will be confirmed during screening and validation."|truncatewords:32 }}</p>
+                                </div>
+                            </article>
+                        {% endfor %}
+                    {% else %}
+                        <div class="rg-public-empty">
+                            <p class="rg-public-empty__title">No open Plantilla positions</p>
+                            <p class="rg-public-empty__copy">There are currently no active Plantilla entries available for public intake.</p>
+                        </div>
+                    {% endif %}
+                </div>
+            </section>
+
+            <section class="rg-public-panel" aria-labelledby="cos-heading">
+                <div class="rg-public-panel__header">
+                    <div>
+                        <h3 class="rg-public-panel__title" id="cos-heading">COS Recruitment</h3>
+                        <p class="rg-public-panel__copy">Opening-based, continuous, or pooling intake under the lighter flexible branch.</p>
+                    </div>
+                    <p class="rg-public-panel__count">{{ cos_entries|length }} open position{{ cos_entries|length|pluralize }}</p>
+                </div>
+
+                <div class="rg-public-panel__body">
+                    {% if cos_entries %}
+                        {% for entry in cos_entries %}
+                            <article class="rg-public-opening rg-public-opening--cos">
+                                <div class="rg-public-opening__top">
+                                    <div>
+                                        <h4 class="rg-public-opening__title">{{ entry.title }}</h4>
+                                        <p class="rg-public-opening__code">Position Code: {{ entry.job_code|default:"Not specified" }}</p>
+                                    </div>
+                                    <a href="{% url 'applicant-intake' entry.pk %}" class="btn btn-rg-primary">Apply Now</a>
+                                </div>
+
+                                <div class="rg-public-opening__meta">
+                                    <div class="rg-public-opening__meta-item">
+                                        <span>Office/Unit</span>
+                                        <strong>{{ entry.unit|default:"Not specified" }}</strong>
+                                    </div>
+                                    <div class="rg-public-opening__meta-item">
+                                        <span>Routing Basis</span>
+                                        <strong>{{ entry.get_level_display }}</strong>
+                                    </div>
+                                    <div class="rg-public-opening__meta-item">
+                                        <span>Intake Type</span>
+                                        <strong>{{ entry.get_intake_mode_display }}</strong>
+                                    </div>
+                                    <div class="rg-public-opening__meta-item">
+                                        <span>Closing Date</span>
+                                        <strong>{% if entry.closing_date %}{{ entry.closing_date|date:"F d, Y" }}{% else %}Open while active{% endif %}</strong>
+                                    </div>
+                                </div>
+
+                                <div class="rg-public-opening__notes">
+                                    <span>Position Details</span>
+                                    <p>{{ entry.description|default:"COS intake remains separate from Plantilla and follows lighter branch handling where applicable."|truncatewords:32 }}</p>
+                                </div>
+                            </article>
+                        {% endfor %}
+                    {% else %}
+                        <div class="rg-public-empty">
+                            <p class="rg-public-empty__title">No open COS positions</p>
+                            <p class="rg-public-empty__copy">There are currently no active Contract of Service entries available for public intake.</p>
+                        </div>
+                    {% endif %}
+                </div>
+            </section>
+        </div>
+    </section>
+
+    <footer class="rg-public-footer">
+        <p class="rg-public-footer__title">Department of Health - Center for Health Development CALABARZON (Region IV-A)</p>
+        <p class="rg-public-footer__copy">Official applicant intake interface for RecruitGuard-CHD</p>
+    </footer>
+</div>
+{% endblock %}
