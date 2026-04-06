@@ -107,6 +107,7 @@ This document summarizes the key cybersecurity rules and protection logic of Rec
 
 ### Visibility Control
 - Sensitive records must be visible only to authorized roles and only under appropriate workflow conditions.
+- Secretariat must not have default visibility to finalized or closed Level 2 cases unless an explicit authorized basis exists.
 
 ---
 

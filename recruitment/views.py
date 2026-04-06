@@ -1,28 +1,49 @@
 from django.contrib import messages
-from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
+from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views import View
-from django.views.generic import CreateView, DetailView, ListView, TemplateView, UpdateView
+from django.views.generic import DetailView, ListView, TemplateView
 
 from .forms import (
-    ApplicationForm,
+    AuditLogSearchForm,
+    CaseClosureForm,
     ComparativeAssessmentReportForm,
+    CompletionRequirementFormSet,
+    CompletionTrackingForm,
     DeliberationRecordForm,
+    EvidenceArchiveForm,
+    EvidenceVaultSearchForm,
     ExamRecordForm,
     EvidenceUploadForm,
     FinalDecisionForm,
     InterviewFallbackUploadForm,
     InterviewRatingForm,
     InterviewSessionForm,
+    ReminderNotificationForm,
+    RequirementChecklistNotificationForm,
     ScreeningReviewForm,
     WorkflowActionForm,
     WorkflowOverrideForm,
     WorkflowReopenForm,
 )
-from .models import AuditLog, PositionPosting, RecruitmentApplication, RecruitmentUser
+from .models import (
+    AuditLog,
+    CompletionRecord,
+    EvidenceVaultItem,
+    PositionPosting,
+    RecruitmentApplication,
+    RecruitmentUser,
+)
+from .notification_services import (
+    send_reminder_notification,
+    send_requirement_checklist_notification,
+    user_can_send_reminder_notification,
+    user_can_send_requirement_checklist_notification,
+)
 from .permissions import (
     InternalUserRequiredMixin,
     SystemAdministratorRequiredMixin,
@@ -31,15 +52,21 @@ from .permissions import (
 from .services import (
     build_submission_packet,
     build_export_bundle,
-    decrypt_evidence_bytes,
+    close_recruitment_case,
     generate_comparative_assessment_report,
+    get_application_audit_logs,
     get_comparative_assessment_report,
     get_comparative_assessment_report_items_for_report,
-    get_exam_record,
-    get_exam_records,
-    get_case_timeline,
+    get_completion_record,
+    get_completion_requirements,
+    decrypt_evidence_bytes,
+    evidence_belongs_to_application_context,
     get_deliberation_record,
     get_deliberation_records,
+    get_evidence_context_application_for_user,
+    get_evidence_queryset_for_user,
+    get_exam_record,
+    get_exam_records,
     get_final_decision_history,
     get_interview_fallback_evidence,
     get_interview_rating_for_user,
@@ -48,26 +75,36 @@ from .services import (
     get_interview_sessions,
     get_latest_final_decision,
     get_latest_finalized_comparative_assessment_report,
+    get_available_actions,
+    get_case_timeline,
     get_screening_record,
     get_screening_records,
+    get_system_audit_logs,
     get_queue_for_user,
     get_visible_positions_for_user,
     grant_secretariat_override,
     process_workflow_action,
+    record_audit_log_review,
     record_final_decision,
-    record_audit_event,
+    record_evidence_vault_access,
+    record_protected_record_access,
     reopen_recruitment_case,
+    save_completion_tracking,
     save_deliberation_record,
     save_exam_record,
     save_interview_rating,
     save_interview_session,
     save_screening_review,
-    submit_application,
-    upload_interview_fallback_rating,
-    upload_evidence_item,
-    user_can_manage_exam,
+    user_can_close_case,
     user_can_manage_comparative_assessment_report,
     user_can_manage_deliberation,
+    user_can_manage_evidence_archive,
+    user_can_manage_completion,
+    upload_evidence_item,
+    upload_interview_fallback_rating,
+    update_evidence_archive_status,
+    user_can_export_application,
+    user_can_manage_exam,
     user_can_manage_interview_rating,
     user_can_manage_interview_session,
     user_can_manage_screening,
@@ -80,17 +117,15 @@ from .services import (
 )
 
 
-class ApplicantRequiredMixin(UserPassesTestMixin):
-    def test_func(self):
-        return (
-            self.request.user.is_authenticated
-            and self.request.user.role == RecruitmentUser.Role.APPLICANT
-        )
-
-
-class StaffRequiredMixin(UserPassesTestMixin):
-    def test_func(self):
-        return self.request.user.is_authenticated and self.request.user.is_workflow_staff
+def _safe_next_url(request, fallback_url):
+    next_url = request.POST.get("next") or request.GET.get("next")
+    if next_url and url_has_allowed_host_and_scheme(
+        next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return next_url
+    return fallback_url
 
 
 class DashboardView(LoginRequiredMixin, InternalUserRequiredMixin, TemplateView):
@@ -138,67 +173,8 @@ class ApplicationListView(LoginRequiredMixin, InternalUserRequiredMixin, ListVie
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context["is_queue"] = False
+        context["is_queue"] = self.request.user.role != RecruitmentUser.Role.APPLICANT
         return context
-
-
-class ApplicationCreateView(LoginRequiredMixin, ApplicantRequiredMixin, CreateView):
-    model = RecruitmentApplication
-    form_class = ApplicationForm
-    template_name = "recruitment/application_form.html"
-
-    def get_form_kwargs(self):
-        kwargs = super().get_form_kwargs()
-        kwargs["user"] = self.request.user
-        return kwargs
-
-    def form_valid(self, form):
-        form.instance.applicant = self.request.user
-        response = super().form_valid(form)
-        record_audit_event(
-            application=self.object,
-            actor=self.request.user,
-            action=AuditLog.Action.APPLICATION_CREATED,
-            description="Applicant created a draft application.",
-        )
-        messages.success(self.request, "Application draft created.")
-        return response
-
-    def get_success_url(self):
-        return reverse("application-detail", kwargs={"pk": self.object.pk})
-
-
-class ApplicationUpdateView(LoginRequiredMixin, ApplicantRequiredMixin, UpdateView):
-    model = RecruitmentApplication
-    form_class = ApplicationForm
-    template_name = "recruitment/application_form.html"
-
-    def get_form_kwargs(self):
-        kwargs = super().get_form_kwargs()
-        kwargs["user"] = self.request.user
-        return kwargs
-
-    def get_queryset(self):
-        return self.request.user.applications.filter(
-            status__in=[
-                RecruitmentApplication.Status.DRAFT,
-                RecruitmentApplication.Status.RETURNED_TO_APPLICANT,
-            ]
-        )
-
-    def form_valid(self, form):
-        response = super().form_valid(form)
-        record_audit_event(
-            application=self.object,
-            actor=self.request.user,
-            action=AuditLog.Action.APPLICATION_UPDATED,
-            description="Applicant updated the draft application.",
-        )
-        messages.success(self.request, "Application draft updated.")
-        return response
-
-    def get_success_url(self):
-        return reverse("application-detail", kwargs={"pk": self.object.pk})
 
 
 class ApplicationDetailView(LoginRequiredMixin, InternalUserRequiredMixin, DetailView):
@@ -216,9 +192,16 @@ class ApplicationDetailView(LoginRequiredMixin, InternalUserRequiredMixin, Detai
         context = super().get_context_data(**kwargs)
         application = context["application"]
         user = self.request.user
+        context["audit_log_url"] = reverse("application-audit-log", kwargs={"pk": application.pk})
         context["recruitment_case"] = getattr(application, "case", None)
         context["case_timeline"] = get_case_timeline(application) if context["recruitment_case"] else []
         context["routing_history"] = application.routing_history.select_related("actor", "recruitment_case")
+        context["notification_history"] = application.notifications.select_related(
+            "triggered_by",
+            "recruitment_case",
+        )
+        context["completion_record"] = get_completion_record(application)
+        context["completion_requirements"] = get_completion_requirements(application)
         context["screening_records"] = get_screening_records(application)
         context["current_screening_record"] = get_screening_record(application)
         context["exam_records"] = get_exam_records(application)
@@ -240,6 +223,13 @@ class ApplicationDetailView(LoginRequiredMixin, InternalUserRequiredMixin, Detai
                 context["current_comparative_assessment_report"]
             )
         )
+        context["evidence_items"] = get_evidence_queryset_for_user(
+            user,
+            application=application,
+            archival_status="all",
+        )
+        context["can_archive_evidence"] = user_can_manage_evidence_archive(user, application)
+        context["evidence_vault_url"] = f"{reverse('evidence-vault-list')}?q={application.reference_label}"
         context["submission_packet"] = (
             build_submission_packet(application) if context["recruitment_case"] else {}
         )
@@ -302,8 +292,28 @@ class ApplicationDetailView(LoginRequiredMixin, InternalUserRequiredMixin, Detai
                 context["car_form"] = ComparativeAssessmentReportForm(instance=report)
         if user_can_record_final_decision(user, application):
             context["final_decision_form"] = FinalDecisionForm()
+        if user_can_manage_completion(user, application):
+            completion_record = context["completion_record"]
+            requirement_instance = completion_record or CompletionRecord(
+                application=application,
+                recruitment_case=application.case,
+                tracked_by=user,
+            )
+            context["completion_form"] = CompletionTrackingForm(
+                instance=completion_record,
+                application=application,
+                actor=user,
+            )
+            context["completion_requirement_formset"] = CompletionRequirementFormSet(
+                instance=requirement_instance,
+                prefix="completion_requirements",
+            )
+        if user_can_close_case(user, application):
+            context["closure_form"] = CaseClosureForm()
         if user_can_process_application(user, application):
-            context["action_form"] = WorkflowActionForm(application=application, user=user)
+            available_actions = get_available_actions(application, user)
+            if available_actions:
+                context["action_form"] = WorkflowActionForm(application=application, user=user)
         if (
             user.role == RecruitmentUser.Role.SYSTEM_ADMIN
             and application.level == PositionPosting.Level.LEVEL_2
@@ -311,26 +321,105 @@ class ApplicationDetailView(LoginRequiredMixin, InternalUserRequiredMixin, Detai
             context["override_form"] = WorkflowOverrideForm()
         if context["recruitment_case"] and user_can_reopen_case(user, context["recruitment_case"]):
             context["reopen_form"] = WorkflowReopenForm()
-        context["can_export"] = user.role in {
-            RecruitmentUser.Role.HRM_CHIEF,
-            RecruitmentUser.Role.APPOINTING_AUTHORITY,
-        } and user_can_view_application(user, application)
+        if user_can_send_requirement_checklist_notification(user, application):
+            context["checklist_notification_form"] = RequirementChecklistNotificationForm()
+        if user_can_send_reminder_notification(user, application):
+            context["reminder_notification_form"] = ReminderNotificationForm()
+        context["can_export"] = user_can_export_application(user, application)
+        record_protected_record_access(
+            application=application,
+            actor=user,
+            source="application_detail",
+        )
         return context
 
 
-class SubmitApplicationView(LoginRequiredMixin, ApplicantRequiredMixin, View):
-    def post(self, request, pk):
-        application = get_object_or_404(RecruitmentApplication, pk=pk, applicant=request.user)
-        try:
-            submit_application(application, request.user)
-        except ValueError as exc:
-            messages.error(request, str(exc))
+class ApplicationAuditLogView(LoginRequiredMixin, InternalUserRequiredMixin, DetailView):
+    model = RecruitmentApplication
+    template_name = "recruitment/audit_log_list.html"
+    context_object_name = "application"
+
+    def get_object(self, queryset=None):
+        application = super().get_object(queryset)
+        if not user_can_view_application(self.request.user, application):
+            raise Http404
+        return application
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        application = context["application"]
+        self.search_form = AuditLogSearchForm(self.request.GET or None)
+        if self.search_form.is_valid():
+            cleaned_data = self.search_form.cleaned_data
         else:
-            messages.success(
-                request,
-                "Application submitted and routed according to level-aware workflow.",
+            cleaned_data = {
+                "q": "",
+                "action": "",
+                "actor_role": "",
+                "sensitive_only": False,
+            }
+        audit_logs = list(
+            get_application_audit_logs(
+                application,
+                search_query=cleaned_data["q"],
+                action=cleaned_data["action"],
+                actor_role=cleaned_data["actor_role"],
+                sensitive_only=cleaned_data["sensitive_only"],
             )
-        return redirect("application-detail", pk=pk)
+        )
+        context["search_form"] = self.search_form
+        context["audit_logs"] = audit_logs
+        context["result_count"] = len(audit_logs)
+        context["review_scope"] = "application"
+        context["recruitment_case"] = getattr(application, "case", None)
+        record_audit_log_review(
+            actor=self.request.user,
+            application=application,
+            search_query=cleaned_data["q"],
+            action=cleaned_data["action"],
+            actor_role=cleaned_data["actor_role"],
+            sensitive_only=cleaned_data["sensitive_only"],
+            result_count=len(audit_logs),
+        )
+        return context
+
+
+class AuditLogListView(LoginRequiredMixin, SystemAdministratorRequiredMixin, TemplateView):
+    template_name = "recruitment/audit_log_list.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        self.search_form = AuditLogSearchForm(self.request.GET or None)
+        if self.search_form.is_valid():
+            cleaned_data = self.search_form.cleaned_data
+        else:
+            cleaned_data = {
+                "q": "",
+                "action": "",
+                "actor_role": "",
+                "sensitive_only": False,
+            }
+        audit_logs = list(
+            get_system_audit_logs(
+                search_query=cleaned_data["q"],
+                action=cleaned_data["action"],
+                actor_role=cleaned_data["actor_role"],
+                sensitive_only=cleaned_data["sensitive_only"],
+            )
+        )
+        context["search_form"] = self.search_form
+        context["audit_logs"] = audit_logs
+        context["result_count"] = len(audit_logs)
+        context["review_scope"] = "system"
+        record_audit_log_review(
+            actor=self.request.user,
+            search_query=cleaned_data["q"],
+            action=cleaned_data["action"],
+            actor_role=cleaned_data["actor_role"],
+            sensitive_only=cleaned_data["sensitive_only"],
+            result_count=len(audit_logs),
+        )
+        return context
 
 
 class EvidenceUploadView(LoginRequiredMixin, InternalUserRequiredMixin, View):
@@ -340,13 +429,22 @@ class EvidenceUploadView(LoginRequiredMixin, InternalUserRequiredMixin, View):
             raise PermissionDenied
         form = EvidenceUploadForm(request.POST, request.FILES)
         if form.is_valid():
-            upload_evidence_item(
+            evidence = upload_evidence_item(
                 application=application,
                 actor=request.user,
                 label=form.cleaned_data["label"],
                 uploaded_file=form.cleaned_data["file"],
+                artifact_scope=(
+                    EvidenceVaultItem.OwnerScope.CASE
+                    if hasattr(application, "case")
+                    else EvidenceVaultItem.OwnerScope.APPLICATION
+                ),
+                artifact_type="workflow_evidence",
             )
-            messages.success(request, "Evidence stored in the encrypted vault.")
+            messages.success(
+                request,
+                f"Evidence stored in the vault as {evidence.version_label}.",
+            )
         else:
             messages.error(
                 request,
@@ -360,7 +458,17 @@ class EvidenceDownloadView(LoginRequiredMixin, InternalUserRequiredMixin, View):
         application = get_object_or_404(RecruitmentApplication, pk=pk)
         if not user_can_view_application(request.user, application):
             raise PermissionDenied
-        evidence = get_object_or_404(application.evidence_items, pk=evidence_pk)
+        evidence = get_object_or_404(
+            EvidenceVaultItem.objects.select_related(
+                "application",
+                "recruitment_case",
+                "recruitment_case__application",
+                "recruitment_entry",
+            ),
+            pk=evidence_pk,
+        )
+        if not evidence_belongs_to_application_context(evidence, application):
+            raise Http404
         content = decrypt_evidence_bytes(evidence, request.user)
         response = HttpResponse(
             content,
@@ -368,6 +476,104 @@ class EvidenceDownloadView(LoginRequiredMixin, InternalUserRequiredMixin, View):
         )
         response["Content-Disposition"] = f'attachment; filename="{evidence.original_filename}"'
         return response
+
+
+class EvidenceArchiveToggleView(LoginRequiredMixin, WorkflowProcessorRequiredMixin, View):
+    def post(self, request, pk, evidence_pk):
+        application = get_object_or_404(RecruitmentApplication, pk=pk)
+        if not user_can_manage_evidence_archive(request.user, application):
+            raise PermissionDenied
+
+        evidence = get_object_or_404(
+            EvidenceVaultItem.objects.select_related(
+                "application",
+                "recruitment_case",
+                "recruitment_case__application",
+                "recruitment_entry",
+            ),
+            pk=evidence_pk,
+        )
+        if not evidence_belongs_to_application_context(evidence, application):
+            raise Http404
+        form = EvidenceArchiveForm(request.POST)
+        if form.is_valid():
+            try:
+                update_evidence_archive_status(
+                    evidence=evidence,
+                    actor=request.user,
+                    action=form.cleaned_data["action"],
+                    archive_tag=form.cleaned_data["archive_tag"],
+                )
+            except ValueError as exc:
+                messages.error(request, str(exc))
+            else:
+                if form.cleaned_data["action"] == "archive":
+                    messages.success(request, "Evidence archived with its retention tag.")
+                else:
+                    messages.success(request, "Evidence restored from archive.")
+        else:
+            messages.error(
+                request,
+                "; ".join(error for errors in form.errors.values() for error in errors),
+            )
+        return redirect(_safe_next_url(request, reverse("application-detail", kwargs={"pk": pk})))
+
+
+class EvidenceVaultListView(LoginRequiredMixin, WorkflowProcessorRequiredMixin, ListView):
+    template_name = "recruitment/evidence_vault_list.html"
+    context_object_name = "evidence_items"
+
+    def get_queryset(self):
+        self.search_form = EvidenceVaultSearchForm(self.request.GET or None)
+        if self.search_form.is_valid():
+            cleaned_data = self.search_form.cleaned_data
+        else:
+            cleaned_data = {
+                "q": "",
+                "stage": "",
+                "artifact_scope": "",
+                "archival_status": "active",
+                "current_version_only": True,
+            }
+        self.search_filters = cleaned_data
+        return get_evidence_queryset_for_user(
+            self.request.user,
+            search_query=cleaned_data["q"],
+            stage=cleaned_data["stage"],
+            artifact_scope=cleaned_data["artifact_scope"],
+            archival_status=cleaned_data["archival_status"],
+            current_version_only=cleaned_data["current_version_only"],
+        )
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        evidence_items = list(context["evidence_items"])
+        for evidence in evidence_items:
+            evidence.context_application = get_evidence_context_application_for_user(
+                self.request.user,
+                evidence,
+            )
+        context["evidence_items"] = evidence_items
+        context["search_form"] = self.search_form
+        context["result_count"] = len(evidence_items)
+        # Include recent audit logs for the combined Evidence & Audit view
+        context["recent_audit_logs"] = list(
+            get_system_audit_logs(
+                search_query="",
+                action="",
+                actor_role="",
+                sensitive_only=False,
+            )[:50]
+        )
+        record_evidence_vault_access(
+            self.request.user,
+            search_query=self.search_filters["q"],
+            stage=self.search_filters["stage"],
+            artifact_scope=self.search_filters["artifact_scope"],
+            archival_status=self.search_filters["archival_status"],
+            current_version_only=self.search_filters["current_version_only"],
+        )
+        return context
 
 
 class WorkflowQueueView(LoginRequiredMixin, WorkflowProcessorRequiredMixin, ListView):
@@ -622,6 +828,81 @@ class FinalDecisionView(LoginRequiredMixin, WorkflowProcessorRequiredMixin, View
         return redirect("application-detail", pk=pk)
 
 
+class CompletionTrackingView(LoginRequiredMixin, WorkflowProcessorRequiredMixin, View):
+    def post(self, request, pk):
+        application = get_object_or_404(RecruitmentApplication, pk=pk)
+        if not user_can_manage_completion(request.user, application):
+            raise PermissionDenied
+
+        completion_record = get_completion_record(application)
+        requirement_instance = completion_record or CompletionRecord(
+            application=application,
+            recruitment_case=application.case,
+            tracked_by=request.user,
+        )
+        form = CompletionTrackingForm(
+            request.POST,
+            instance=completion_record,
+            application=application,
+            actor=request.user,
+        )
+        formset = CompletionRequirementFormSet(
+            request.POST,
+            instance=requirement_instance,
+            prefix="completion_requirements",
+        )
+        if form.is_valid() and formset.is_valid():
+            try:
+                save_completion_tracking(
+                    application=application,
+                    actor=request.user,
+                    cleaned_data=form.cleaned_data,
+                    requirement_formset=formset,
+                )
+            except (ValueError, ValidationError) as exc:
+                messages.error(request, str(exc))
+            else:
+                messages.success(request, "Completion tracking saved.")
+        else:
+            errors = []
+            errors.extend(error for error_list in form.errors.values() for error in error_list)
+            errors.extend(error for error in formset.non_form_errors())
+            for requirement_form in formset.forms:
+                errors.extend(
+                    error
+                    for error_list in requirement_form.errors.values()
+                    for error in error_list
+                )
+            messages.error(
+                request,
+                "; ".join(errors) or "Complete the completion tracking fields before saving.",
+            )
+        return redirect("application-detail", pk=pk)
+
+
+class CaseClosureView(LoginRequiredMixin, WorkflowProcessorRequiredMixin, View):
+    def post(self, request, pk):
+        application = get_object_or_404(RecruitmentApplication, pk=pk)
+        if not user_can_manage_completion(request.user, application):
+            raise PermissionDenied
+
+        form = CaseClosureForm(request.POST)
+        if form.is_valid():
+            try:
+                close_recruitment_case(
+                    application=application,
+                    actor=request.user,
+                    closure_notes=form.cleaned_data["closure_notes"],
+                )
+            except ValueError as exc:
+                messages.error(request, str(exc))
+            else:
+                messages.success(request, "Recruitment case closed after completion tracking.")
+        else:
+            messages.error(request, "Closure notes are required.")
+        return redirect("application-detail", pk=pk)
+
+
 class WorkflowOverrideView(LoginRequiredMixin, SystemAdministratorRequiredMixin, View):
     def post(self, request, pk):
         application = get_object_or_404(RecruitmentApplication, pk=pk)
@@ -642,6 +923,71 @@ class WorkflowOverrideView(LoginRequiredMixin, SystemAdministratorRequiredMixin,
         if user_can_view_application(request.user, application):
             return redirect("application-detail", pk=pk)
         return redirect("dashboard")
+
+
+class RequirementChecklistNotificationView(LoginRequiredMixin, InternalUserRequiredMixin, View):
+    def post(self, request, pk):
+        application = get_object_or_404(RecruitmentApplication, pk=pk)
+        if not (
+            user_can_view_application(request.user, application)
+            and user_can_send_requirement_checklist_notification(request.user, application)
+        ):
+            raise PermissionDenied
+
+        form = RequirementChecklistNotificationForm(request.POST)
+        if form.is_valid():
+            try:
+                send_requirement_checklist_notification(
+                    application=application,
+                    actor=request.user,
+                    checklist_items=form.cleaned_data["checklist_items"],
+                    deadline=form.cleaned_data["deadline"],
+                    additional_message=form.cleaned_data["additional_message"],
+                )
+            except ValueError as exc:
+                messages.error(request, str(exc))
+            else:
+                messages.success(
+                    request,
+                    "Requirement checklist notification queued for email delivery.",
+                )
+        else:
+            messages.error(
+                request,
+                "; ".join(error for errors in form.errors.values() for error in errors),
+            )
+        return redirect("application-detail", pk=pk)
+
+
+class ReminderNotificationView(LoginRequiredMixin, InternalUserRequiredMixin, View):
+    def post(self, request, pk):
+        application = get_object_or_404(RecruitmentApplication, pk=pk)
+        if not (
+            user_can_view_application(request.user, application)
+            and user_can_send_reminder_notification(request.user, application)
+        ):
+            raise PermissionDenied
+
+        form = ReminderNotificationForm(request.POST)
+        if form.is_valid():
+            try:
+                send_reminder_notification(
+                    application=application,
+                    actor=request.user,
+                    reminder_subject=form.cleaned_data["reminder_subject"],
+                    reminder_message=form.cleaned_data["reminder_message"],
+                    deadline=form.cleaned_data["deadline"],
+                )
+            except ValueError as exc:
+                messages.error(request, str(exc))
+            else:
+                messages.success(request, "Reminder notification queued for email delivery.")
+        else:
+            messages.error(
+                request,
+                "; ".join(error for errors in form.errors.values() for error in errors),
+            )
+        return redirect("application-detail", pk=pk)
 
 
 class WorkflowReopenView(LoginRequiredMixin, WorkflowProcessorRequiredMixin, View):
@@ -671,16 +1017,11 @@ class WorkflowReopenView(LoginRequiredMixin, WorkflowProcessorRequiredMixin, Vie
 class ExportApplicationBundleView(LoginRequiredMixin, InternalUserRequiredMixin, View):
     def get(self, request, pk):
         application = get_object_or_404(RecruitmentApplication, pk=pk)
-        if not (
-            request.user.role
-            in {
-                RecruitmentUser.Role.HRM_CHIEF,
-                RecruitmentUser.Role.APPOINTING_AUTHORITY,
-            }
-            and user_can_view_application(request.user, application)
-        ):
+        if not user_can_export_application(request.user, application):
             raise PermissionDenied
         bundle = build_export_bundle(application, request.user)
         response = HttpResponse(bundle, content_type="application/zip")
-        response["Content-Disposition"] = f'attachment; filename="{application.reference_number}.zip"'
+        response["Content-Disposition"] = (
+            f'attachment; filename="{application.reference_number}-export.zip"'
+        )
         return response

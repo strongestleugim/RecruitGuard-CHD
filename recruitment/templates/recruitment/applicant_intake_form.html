@@ -2,117 +2,130 @@
 {% load recruitment_ui %}
 
 {% block content %}
-<div class="rg-page-header">
-    <div>
-        <p class="rg-eyebrow">{{ entry.get_branch_display }} Intake</p>
-        <h1 class="rg-page-title">Applicant Intake Form</h1>
-        <p class="rg-page-copy">Complete the required submission details for <strong>{{ entry.title }}</strong>. Final submission will remain pending until OTP verification succeeds.</p>
-    </div>
-    <div class="rg-header-stats">
-        <div class="rg-stat-chip">
-            <strong>{{ entry.job_code }}</strong>
-            <span>Entry Code</span>
-        </div>
-        <div class="rg-stat-chip">
-            <strong>{{ entry.get_level_display }}</strong>
-            <span>Routing Basis</span>
-        </div>
-    </div>
-</div>
+<div class="rg-container" style="max-width:900px;">
+    <h1 style="text-align:center;font-size:1.35rem;margin:1rem 0 .5rem;">Apply for Vacancy — Accountless Submission</h1>
 
-<div class="row g-4">
-    <div class="col-lg-4">
-        <div class="card p-4 h-100">
-            <div class="d-flex flex-wrap gap-2 mb-3">
-                <span class="rg-pill rg-pill--{{ entry.branch|branch_theme }}">{{ entry.get_branch_display }}</span>
-                <span class="rg-pill rg-pill--{{ entry.level|level_theme }}">{{ entry.get_level_display }}</span>
-                <span class="rg-pill rg-pill--info">{{ entry.get_intake_mode_display }}</span>
-            </div>
-            <h2 class="h4 mb-2">{{ entry.title }}</h2>
-            <p class="rg-note mb-4">{{ entry.unit }}{% if entry.closing_date %} | Closes {{ entry.closing_date|date:"M d, Y" }}{% endif %}</p>
-
-            <div class="rg-form-section mb-3">
-                <h3 class="rg-form-section__title">Requirements Snapshot</h3>
-                <p class="rg-form-section__copy mb-0">{{ entry.requirements|default:"Requirement details will be validated during the screening stage." }}</p>
-            </div>
-
-            <div class="rg-form-section mb-3">
-                <h3 class="rg-form-section__title">Qualification Reference</h3>
-                <p class="rg-form-section__copy mb-0">{{ entry.qualification_reference|default:"No additional qualification reference has been posted for this entry." }}</p>
-            </div>
-
-            <div class="rg-form-section">
-                <h3 class="rg-form-section__title">Before you continue</h3>
-                <ul class="rg-bullet-list rg-note">
-                    <li>Use an active email address because the OTP is sent there.</li>
-                    <li>Upload every required document in its own field before requesting the OTP.</li>
-                    <li>Mark the performance rating item as not applicable only when you truly do not have one to submit.</li>
-                    <li>Review the checklist statements carefully before requesting the OTP.</li>
-                </ul>
-            </div>
-        </div>
+    <div class="rg-step-indicator">
+        <span class="rg-step-indicator__step is-active">
+            <span class="rg-step-indicator__num">1</span> Email Verification
+        </span>
+        <span class="rg-step-indicator__arrow">→</span>
+        <span class="rg-step-indicator__step">
+            <span class="rg-step-indicator__num">2</span> Upload Documents
+        </span>
+        <span class="rg-step-indicator__arrow">→</span>
+        <span class="rg-step-indicator__step">
+            <span class="rg-step-indicator__num">3</span> Review &amp; Submit
+        </span>
     </div>
 
-    <div class="col-lg-8">
-        <div class="card p-4">
+    <div class="row g-4">
+        <div class="col-lg-8">
             <form method="post" enctype="multipart/form-data">
                 {% csrf_token %}
                 {% if form.non_field_errors %}
                     <div class="alert alert-danger">{{ form.non_field_errors }}</div>
                 {% endif %}
 
-                <div class="rg-form-section mb-4">
-                    <h2 class="rg-form-section__title">Applicant Details</h2>
-                    <p class="rg-form-section__copy">Enter the contact details that will be used for OTP verification, receipt generation, and future status lookup.</p>
+                <div class="card p-4 mb-4">
+                    <h2 class="h5 mb-1">Email Verification</h2>
+                    <p class="rg-note mb-3">Enter your email address. An OTP will be sent after submission to verify your identity.</p>
                     <div class="row g-3">
-                        <div class="col-md-6">{% include "recruitment/includes/form_field.html" with field=form.first_name %}</div>
-                        <div class="col-md-6">{% include "recruitment/includes/form_field.html" with field=form.last_name %}</div>
                         <div class="col-md-6">{% include "recruitment/includes/form_field.html" with field=form.email %}</div>
                         <div class="col-md-6">{% include "recruitment/includes/form_field.html" with field=form.phone %}</div>
+                        <div class="col-md-6">{% include "recruitment/includes/form_field.html" with field=form.first_name %}</div>
+                        <div class="col-md-6">{% include "recruitment/includes/form_field.html" with field=form.last_name %}</div>
+                    </div>
+                    <p class="rg-note mt-2" style="font-size:.75rem;"><em>ℹ Note: OTP is required to verify submission.</em></p>
+                </div>
+
+                <div class="card p-4 mb-4">
+                    <h2 class="h5 mb-1">Upload Documents</h2>
+                    <p class="rg-note mb-3">Upload each requirement-coded document for this recruitment entry.</p>
+                    <div class="rg-upload-grid mb-3">
+                        {% for field in form.document_upload_fields %}
+                            <label class="rg-upload-card" for="{{ field.id_for_label }}">
+                                <div class="rg-upload-card__icon">📄</div>
+                                <p class="rg-upload-card__label">{{ field.label }}</p>
+                                <p class="rg-upload-card__hint">Upload PDF/JPG</p>
+                                {{ field }}
+                            </label>
+                        {% endfor %}
                     </div>
                 </div>
 
-                <div class="rg-form-section mb-4">
-                    <h2 class="rg-form-section__title">Application Narrative</h2>
-                    <p class="rg-form-section__copy">Summarize your qualifications clearly so the internal reviewers can assess completeness and qualification basis efficiently.</p>
+                <div class="card p-4 mb-4">
+                    <h2 class="h5 mb-1">Application Narrative</h2>
+                    <p class="rg-note mb-3">Summarize your qualifications clearly.</p>
                     <div class="row g-3">
                         <div class="col-12">{% include "recruitment/includes/form_field.html" with field=form.qualification_summary %}</div>
                         <div class="col-12">{% include "recruitment/includes/form_field.html" with field=form.cover_letter %}</div>
                     </div>
                 </div>
 
-                <div class="rg-form-section mb-4">
-                    <h2 class="rg-form-section__title">Required Documents</h2>
-                    <p class="rg-form-section__copy">Each requirement must be uploaded in its designated field. The application cannot proceed until every mandatory document is present.</p>
-                    <div class="row g-3">
-                        <div class="col-12">{% include "recruitment/includes/form_field.html" with field=form.signed_cover_letter %}</div>
-                        <div class="col-12">{% include "recruitment/includes/form_field.html" with field=form.personal_data_sheet %}</div>
-                        <div class="col-12">{% include "recruitment/includes/form_field.html" with field=form.work_experience_sheet %}</div>
-                        <div class="col-12">{% include "recruitment/includes/form_field.html" with field=form.performance_rating %}</div>
-                        <div class="col-12">{% include "recruitment/includes/form_field.html" with field=form.performance_rating_not_applicable %}</div>
-                        <div class="col-12">{% include "recruitment/includes/form_field.html" with field=form.eligibility_or_license %}</div>
-                        <div class="col-12">{% include "recruitment/includes/form_field.html" with field=form.transcript_of_records %}</div>
-                        <div class="col-12">{% include "recruitment/includes/form_field.html" with field=form.diploma %}</div>
-                        <div class="col-12">{% include "recruitment/includes/form_field.html" with field=form.certificate_of_employment %}</div>
-                        <div class="col-12">{% include "recruitment/includes/form_field.html" with field=form.training_certificates %}</div>
+                <div class="card p-4 mb-4">
+                    <h2 class="h5 mb-1">Review Summary</h2>
+                    <p class="rg-note mb-3">Confirm your details before sending the OTP.</p>
+                    <div class="rg-info-list">
+                        <div class="rg-info-row">
+                            <div class="rg-info-row__label">Vacancy Title</div>
+                            <div class="rg-info-row__value">{{ entry.title }}</div>
+                        </div>
+                        <div class="rg-info-row">
+                            <div class="rg-info-row__label">Branch</div>
+                            <div class="rg-info-row__value">{{ entry.get_branch_display }}</div>
+                        </div>
+                        <div class="rg-info-row">
+                            <div class="rg-info-row__label">Routing Basis</div>
+                            <div class="rg-info-row__value">{{ entry.get_level_display }}</div>
+                        </div>
                     </div>
                 </div>
 
-                <div class="rg-form-section">
-                    <h2 class="rg-form-section__title">Submission Checklist</h2>
-                    <p class="rg-form-section__copy">All checklist items must be confirmed before the system issues the OTP for final submission.</p>
+                <div class="card p-4">
+                    <h2 class="h5 mb-1">Submission Checklist</h2>
+                    <p class="rg-note mb-3">All checklist items must be confirmed before submission.</p>
                     <div class="rg-form-grid">
                         {% include "recruitment/includes/form_field.html" with field=form.checklist_privacy_consent %}
                         {% include "recruitment/includes/form_field.html" with field=form.checklist_documents_complete %}
                         {% include "recruitment/includes/form_field.html" with field=form.checklist_information_certified %}
                     </div>
-                </div>
-
-                <div class="rg-form-actions">
-                    <button type="submit" class="btn btn-rg-primary">Send OTP</button>
-                    <a href="{% url 'applicant-portal' %}" class="btn btn-outline-secondary">Back to Portal</a>
+                    <div class="rg-form-actions">
+                        <button type="submit" class="btn btn-rg-primary">Submit Application</button>
+                        <a href="{% url 'applicant-portal' %}" class="btn btn-outline-secondary">Back to Vacancies</a>
+                    </div>
+                    <p class="rg-note mt-2" style="font-size:.75rem;">⚠ After final submission, edits are not allowed unless a resubmission window is enabled by Secretariat.</p>
                 </div>
             </form>
+        </div>
+        <div class="col-lg-4">
+            <div class="card p-3 mb-3">
+                <div class="d-flex flex-wrap gap-2 mb-2">
+                    <span class="rg-pill rg-pill--{{ entry.branch|branch_theme }}">{{ entry.get_branch_display }}</span>
+                    <span class="rg-pill rg-pill--{{ entry.level|level_theme }}">{{ entry.get_level_display }}</span>
+                </div>
+                <h3 class="h6 mb-1">{{ entry.title }}</h3>
+                <p class="rg-note" style="font-size:.75rem;">{{ entry.job_code }}{% if entry.closing_date %} | Closes {{ entry.closing_date|date:"M d, Y" }}{% endif %}</p>
+            </div>
+
+            <div class="rg-checklist-panel">
+                <p class="rg-checklist-panel__title">Completeness Checklist</p>
+                {% for field in form.document_upload_fields %}
+                    <div class="rg-checklist-item">
+                        <span class="rg-checklist-item__dot"></span>
+                        {{ field.label }}
+                    </div>
+                {% endfor %}
+            </div>
+
+            <div class="card p-3 mt-3">
+                <p class="rg-eyebrow">Before you continue</p>
+                <ul class="rg-bullet-list rg-note" style="font-size:.75rem;">
+                    <li>Use an active email address because the OTP is sent there.</li>
+                    <li>Upload the requirement-coded documents before requesting the OTP.</li>
+                    <li>Review the checklist statements carefully.</li>
+                </ul>
+            </div>
         </div>
     </div>
 </div>

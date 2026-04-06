@@ -1,22 +1,16 @@
 {% extends "internal_base.html" %}
 
-{% block internal_content %}
+{% block content %}
 <div class="rg-page-header">
     <div>
         <p class="rg-eyebrow">Recruitment Entry Management</p>
         <h1 class="rg-page-title">Position Catalog</h1>
-        <p class="rg-page-copy">Reference positions reused by Plantilla and COS recruitment entries inside the shared internal recruitment administration workspace.</p>
+        <p class="rg-page-copy">Reference positions used by Plantilla and COS recruitment entries.</p>
     </div>
     <div class="rg-page-actions">
-        <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary">Dashboard</a>
         <a href="{% url 'recruitment-entry-list' %}" class="btn btn-outline-secondary">View Entries</a>
         <a href="{% url 'position-catalog-create' %}" class="btn btn-rg-primary">New Position</a>
     </div>
-</div>
-
-<div class="rg-admin-note mb-4">
-    <strong>Shared catalog control</strong>
-    <p>Position references stay centralized here so public intake, internal case handling, and branch-aware recruitment entries all draw from the same authoritative records.</p>
 </div>
 
 <div class="rg-table-shell">

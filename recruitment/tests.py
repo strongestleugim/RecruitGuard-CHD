@@ -1,8 +1,11 @@
+import importlib
 import io
+import json
 import re
 import zipfile
 from datetime import timedelta
 
+from django.apps import apps as django_apps
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.core.exceptions import ValidationError
@@ -15,12 +18,12 @@ from .models import (
     AuditLog,
     ComparativeAssessmentReport,
     ComparativeAssessmentReportItem,
-    DeliberationRecord,
+    CompletionRecord,
+    CompletionRequirement,
     ExamRecord,
     EvidenceVaultItem,
     FinalDecision,
-    InterviewRating,
-    InterviewSession,
+    NotificationLog,
     Position,
     PositionPosting,
     RecruitmentApplication,
@@ -30,15 +33,17 @@ from .models import (
     ScreeningRecord,
     WorkflowOverride,
 )
-from .requirements import PERFORMANCE_RATING, get_applicant_document_requirements
+from .requirements import get_required_applicant_document_requirements
 from .services import (
+    build_export_bundle,
     build_submission_packet,
     generate_comparative_assessment_report,
     get_queue_for_user,
+    grant_secretariat_override,
     issue_application_otp,
     process_workflow_action,
     record_final_decision,
-    reopen_recruitment_case,
+    record_system_audit_event,
     save_deliberation_record,
     save_exam_record,
     save_interview_rating,
@@ -139,53 +144,41 @@ class BaseRecruitmentTestCase(TestCase):
     def level1_closing_date(self):
         return timezone.localdate() + timedelta(days=15)
 
-    def build_requirement_upload(self, requirement_code):
-        return SimpleUploadedFile(
-            f"{requirement_code}.txt",
-            f"sample evidence for {requirement_code}".encode("utf-8"),
-            content_type="text/plain",
-        )
-
-    def upload_complete_required_documents(self, application, actor, include_performance_rating=False):
-        application.performance_rating_not_applicable = not include_performance_rating
-        application.save(update_fields=["performance_rating_not_applicable", "updated_at"])
-
-        for requirement in get_applicant_document_requirements():
-            if requirement.code == PERFORMANCE_RATING and application.performance_rating_not_applicable:
-                continue
-            upload_evidence_item(
-                application=application,
-                actor=actor,
-                label=requirement.title,
-                uploaded_file=self.build_requirement_upload(requirement.code),
-                document_type=requirement.code,
+    def upload_required_applicant_documents(self, application, actor, *, content_prefix="sample"):
+        uploaded_evidence = []
+        for requirement in get_required_applicant_document_requirements():
+            uploaded_evidence.append(
+                upload_evidence_item(
+                    application=application,
+                    actor=actor,
+                    label=requirement.title,
+                    uploaded_file=SimpleUploadedFile(
+                        f"{requirement.code}.txt",
+                        f"{content_prefix}:{requirement.code}".encode("utf-8"),
+                        content_type="text/plain",
+                    ),
+                    document_key=requirement.code,
+                    artifact_scope=EvidenceVaultItem.OwnerScope.APPLICATION,
+                    artifact_type="applicant_document",
+                )
             )
+        return uploaded_evidence
 
     def make_application(self, position):
-        return self.make_application_for_user(
-            position=position,
-            user=self.applicant,
-            first_name="Test",
-            last_name="Applicant",
-            email="applicant@example.com",
-        )
-
-    def make_application_for_user(self, position, user, first_name, last_name, email):
         application = RecruitmentApplication.objects.create(
-            applicant=user,
+            applicant=self.applicant,
             position=position,
-            applicant_first_name=first_name,
-            applicant_last_name=last_name,
-            applicant_email=email,
+            applicant_first_name="Test",
+            applicant_last_name="Applicant",
+            applicant_email="applicant@example.com",
             applicant_phone="09171234567",
             checklist_privacy_consent=True,
             checklist_documents_complete=True,
             checklist_information_certified=True,
-            performance_rating_not_applicable=True,
             qualification_summary="Qualified applicant.",
             cover_letter="I am applying.",
         )
-        self.upload_complete_required_documents(application, user)
+        self.upload_required_applicant_documents(application, self.applicant)
         return application
 
     def verify_application_for_submission(self, application):
@@ -244,10 +237,13 @@ class BaseRecruitmentTestCase(TestCase):
 
     def move_application_to_hrm_chief_review(self, application):
         self.verify_application_for_submission(application)
-        submit_application(application, self.applicant)
-        self.finalize_screening_for_current_stage(application, self.secretariat)
-        process_workflow_action(application, self.secretariat, "endorse", "Forward to HRM Chief.")
+        with self.captureOnCommitCallbacks(execute=True):
+            submit_application(application, self.applicant)
         application.refresh_from_db()
+        if application.case.current_stage == RecruitmentCase.Stage.SECRETARIAT_REVIEW:
+            self.finalize_screening_for_current_stage(application, self.secretariat)
+            process_workflow_action(application, self.secretariat, "endorse", "Forward to HRM Chief.")
+            application.refresh_from_db()
         return application
 
     def move_application_to_hrmpsb_review(self, application):
@@ -325,6 +321,19 @@ class BaseRecruitmentTestCase(TestCase):
 
     def extract_otp_from_last_email(self):
         return re.search(r"\b(\d{6})\b", mail.outbox[-1].body).group(1)
+
+    def make_selected_application(self, position):
+        application = self.make_application(position)
+        self.move_application_to_appointing_review(application)
+        with self.captureOnCommitCallbacks(execute=True):
+            self.record_final_decision_for_current_stage(
+                application,
+                self.appointing,
+                decision_outcome=FinalDecision.Outcome.SELECTED,
+                decision_notes="Approved for completion tracking.",
+            )
+        application.refresh_from_db()
+        return application
 
 
 @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
@@ -489,6 +498,17 @@ class IdentityAdministrationTests(BaseRecruitmentTestCase):
         response = client.get(reverse("application-detail", kwargs={"pk": application.pk}))
         self.assertEqual(response.status_code, 404)
 
+    def test_system_admin_role_does_not_inherit_django_admin_access(self):
+        self.sysadmin.refresh_from_db()
+        self.assertFalse(self.sysadmin.is_staff)
+
+        client = Client()
+        client.force_login(self.sysadmin)
+        response = client.get("/admin/")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/admin/login/", response.url)
+
 
 class RecruitmentEntryManagementTests(BaseRecruitmentTestCase):
     def test_entry_manager_can_create_position_catalog_record(self):
@@ -602,7 +622,7 @@ class RecruitmentEntryManagementTests(BaseRecruitmentTestCase):
 
 
 class ApplicantPortalFlowTests(BaseRecruitmentTestCase):
-    def portal_payload(self, include_performance_rating=False, **overrides):
+    def portal_payload(self, **overrides):
         payload = {
             "first_name": "Pat",
             "last_name": "Applicant",
@@ -610,17 +630,16 @@ class ApplicantPortalFlowTests(BaseRecruitmentTestCase):
             "phone": "09171234567",
             "qualification_summary": "Qualified applicant with complete supporting credentials.",
             "cover_letter": "Please consider this application.",
-            "performance_rating_not_applicable": "on",
             "checklist_privacy_consent": "on",
             "checklist_documents_complete": "on",
             "checklist_information_certified": "on",
         }
-        for requirement in get_applicant_document_requirements():
-            if requirement.code == PERFORMANCE_RATING and not include_performance_rating:
-                continue
-            payload[requirement.file_field_name] = self.build_requirement_upload(requirement.code)
-        if include_performance_rating:
-            payload.pop("performance_rating_not_applicable", None)
+        for requirement in get_required_applicant_document_requirements():
+            payload[requirement.code] = SimpleUploadedFile(
+                f"{requirement.code}.txt",
+                f"portal:{requirement.code}".encode("utf-8"),
+                content_type="text/plain",
+            )
         payload.update(overrides)
         return payload
 
@@ -628,8 +647,8 @@ class ApplicantPortalFlowTests(BaseRecruitmentTestCase):
         response = self.client.get(reverse("applicant-portal"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Plantilla Recruitment")
-        self.assertContains(response, "COS Recruitment")
+        self.assertContains(response, "Vacancies List")
+        self.assertContains(response, "Vacancy Detail")
         self.assertNotContains(response, "Internal Login")
         self.assertNotContains(response, "My Queue")
         self.assertNotContains(response, "Manage Entries")
@@ -651,8 +670,6 @@ class ApplicantPortalFlowTests(BaseRecruitmentTestCase):
         self.assertEqual(len(mail.outbox), 1)
         self.assertTrue(application.otp_hash)
         self.assertIsNone(application.submitted_at)
-        self.assertTrue(application.performance_rating_not_applicable)
-        self.assertTrue(application.has_complete_required_documents)
 
         response = client.post(
             reverse("applicant-otp", kwargs={"token": application.public_token}),
@@ -724,46 +741,6 @@ class ApplicantPortalFlowTests(BaseRecruitmentTestCase):
         )
         self.assertContains(status_response, application.get_status_display())
 
-    def test_public_intake_requires_each_named_document_before_creating_a_draft(self):
-        response = self.client.post(
-            reverse("applicant-intake", kwargs={"pk": self.level1_position.pk}),
-            self.portal_payload(
-                email="missing.document@example.com",
-                transcript_of_records="",
-            ),
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "This field is required.")
-        self.assertFalse(
-            RecruitmentApplication.objects.filter(
-                applicant_email="missing.document@example.com",
-                position=self.level1_position,
-            ).exists()
-        )
-        self.assertEqual(len(mail.outbox), 0)
-
-    def test_public_intake_accepts_uploaded_performance_rating_when_provided(self):
-        client = Client()
-        response = client.post(
-            reverse("applicant-intake", kwargs={"pk": self.level1_position.pk}),
-            self.portal_payload(
-                include_performance_rating=True,
-                email="rated.applicant@example.com",
-            ),
-            follow=True,
-        )
-
-        self.assertEqual(response.status_code, 200)
-        application = RecruitmentApplication.objects.get(
-            position=self.level1_position,
-            applicant_email="rated.applicant@example.com",
-        )
-        self.assertFalse(application.performance_rating_not_applicable)
-        self.assertTrue(
-            application.evidence_items.filter(document_type=PERFORMANCE_RATING).exists()
-        )
-
     def test_invalid_otp_is_rejected(self):
         client = Client()
         client.post(
@@ -785,6 +762,112 @@ class ApplicantPortalFlowTests(BaseRecruitmentTestCase):
         application.refresh_from_db()
         self.assertContains(response, "The OTP is invalid.")
         self.assertIsNone(application.otp_verified_at)
+
+    def test_portal_intake_requires_requirement_coded_documents(self):
+        client = Client()
+        missing_requirement = get_required_applicant_document_requirements()[0]
+        payload = self.portal_payload(email="missing.requirement@example.com")
+        payload.pop(missing_requirement.code)
+
+        response = client.post(
+            reverse("applicant-intake", kwargs={"pk": self.level1_position.pk}),
+            payload,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            f"Upload the required document for {missing_requirement.title}.",
+        )
+        self.assertFalse(
+            RecruitmentApplication.objects.filter(
+                position=self.level1_position,
+                applicant_email="missing.requirement@example.com",
+            ).exists()
+        )
+
+    def test_portal_reuses_existing_draft_and_requirement_documents_for_same_entry_email(self):
+        client = Client()
+        initial_response = client.post(
+            reverse("applicant-intake", kwargs={"pk": self.level1_position.pk}),
+            self.portal_payload(email="reused.draft@example.com"),
+        )
+        self.assertEqual(initial_response.status_code, 302)
+        original_application = RecruitmentApplication.objects.get(
+            position=self.level1_position,
+            applicant_email="reused.draft@example.com",
+        )
+        applicant_id = original_application.applicant_id
+
+        payload = self.portal_payload(
+            email="reused.draft@example.com",
+            qualification_summary="Updated qualifications for the same draft.",
+        )
+        for requirement in get_required_applicant_document_requirements():
+            payload.pop(requirement.code)
+
+        followup_response = client.post(
+            reverse("applicant-intake", kwargs={"pk": self.level1_position.pk}),
+            payload,
+        )
+
+        self.assertEqual(followup_response.status_code, 302)
+        refreshed_application = RecruitmentApplication.objects.get(
+            position=self.level1_position,
+            applicant_email="reused.draft@example.com",
+        )
+        self.assertEqual(RecruitmentApplication.objects.filter(position=self.level1_position).count(), 1)
+        self.assertEqual(refreshed_application.pk, original_application.pk)
+        self.assertEqual(refreshed_application.applicant_id, applicant_id)
+        self.assertEqual(
+            refreshed_application.qualification_summary,
+            "Updated qualifications for the same draft.",
+        )
+        self.assertEqual(
+            RecruitmentUser.objects.filter(
+                role=RecruitmentUser.Role.APPLICANT,
+                email__iexact="reused.draft@example.com",
+            ).count(),
+            1,
+        )
+        self.assertTrue(
+            AuditLog.objects.filter(
+                application=refreshed_application,
+                action=AuditLog.Action.APPLICATION_UPDATED,
+            ).exists()
+        )
+
+    def test_portal_reuses_existing_applicant_identity_by_email_across_entries(self):
+        client = Client()
+        shared_email = "shared.identity@example.com"
+        first_response = client.post(
+            reverse("applicant-intake", kwargs={"pk": self.level1_position.pk}),
+            self.portal_payload(email=shared_email),
+        )
+        self.assertEqual(first_response.status_code, 302)
+        first_application = RecruitmentApplication.objects.get(
+            position=self.level1_position,
+            applicant_email=shared_email,
+        )
+
+        second_response = client.post(
+            reverse("applicant-intake", kwargs={"pk": self.cos_position.pk}),
+            self.portal_payload(email=shared_email),
+        )
+        self.assertEqual(second_response.status_code, 302)
+        second_application = RecruitmentApplication.objects.get(
+            position=self.cos_position,
+            applicant_email=shared_email,
+        )
+
+        self.assertEqual(first_application.applicant_id, second_application.applicant_id)
+        self.assertEqual(
+            RecruitmentUser.objects.filter(
+                role=RecruitmentUser.Role.APPLICANT,
+                email__iexact=shared_email,
+            ).count(),
+            1,
+        )
 
     def test_expired_otp_cannot_be_used_to_verify_or_finalize(self):
         client = Client()
@@ -819,37 +902,6 @@ class ApplicantPortalFlowTests(BaseRecruitmentTestCase):
         self.assertContains(response, "Your OTP verification has expired.")
         application.refresh_from_db()
         self.assertIsNone(application.submitted_at)
-
-    def test_submit_application_rejects_missing_required_documents_server_side(self):
-        application = RecruitmentApplication.objects.create(
-            applicant=self.applicant,
-            position=self.level1_position,
-            applicant_first_name="Test",
-            applicant_last_name="Applicant",
-            applicant_email="incomplete@example.com",
-            applicant_phone="09171234567",
-            checklist_privacy_consent=True,
-            checklist_documents_complete=True,
-            checklist_information_certified=True,
-            performance_rating_not_applicable=True,
-            qualification_summary="Qualified applicant.",
-            cover_letter="I am applying.",
-            otp_verified_at=timezone.now(),
-            otp_expires_at=timezone.now() + timedelta(minutes=5),
-        )
-        upload_evidence_item(
-            application=application,
-            actor=self.applicant,
-            label="Signed Cover Letter addressed to VOLTAIRE S. GUADALUPE, MD, MPH, MAHPS, Director IV",
-            uploaded_file=self.build_requirement_upload("signed_cover_letter"),
-            document_type="signed_cover_letter",
-        )
-
-        with self.assertRaisesMessage(
-            ValueError,
-            "Upload all required documents before proceeding.",
-        ):
-            submit_application(application, self.applicant)
 
 
 class WorkflowRoutingTests(BaseRecruitmentTestCase):
@@ -920,56 +972,6 @@ class WorkflowRoutingTests(BaseRecruitmentTestCase):
                 "Attempted before screening finalization.",
             )
 
-    def test_endorsement_requires_finalized_exam_when_exam_record_exists_for_stage(self):
-        application = self.make_application(self.level1_position)
-        self.verify_application_for_submission(application)
-        submit_application(application, self.applicant)
-        self.finalize_screening_for_current_stage(application, self.secretariat)
-
-        save_exam_record(
-            application=application,
-            actor=self.secretariat,
-            cleaned_data={
-                "exam_type": "Technical Examination",
-                "exam_status": ExamRecord.ExamStatus.COMPLETED,
-                "exam_score": "82.50",
-                "exam_result": "Draft result",
-                "valid_from": timezone.localdate(),
-                "valid_until": timezone.localdate() + timedelta(days=180),
-                "exam_notes": "Draft exam output before endorsement.",
-            },
-            finalize=False,
-        )
-
-        with self.assertRaisesMessage(
-            ValueError,
-            "Finalize the examination record before endorsing this application.",
-        ):
-            process_workflow_action(
-                application,
-                self.secretariat,
-                "endorse",
-                "Attempted before exam finalization.",
-            )
-
-        self.finalize_exam_for_current_stage(
-            application,
-            self.secretariat,
-            exam_score="90.00",
-            exam_result="Passed",
-            valid_from=timezone.localdate(),
-            valid_until=timezone.localdate() + timedelta(days=365),
-            exam_notes="Finalized examination output.",
-        )
-        process_workflow_action(
-            application,
-            self.secretariat,
-            "endorse",
-            "Forward after exam finalization.",
-        )
-        application.refresh_from_db()
-        self.assertEqual(application.current_handler_role, RecruitmentUser.Role.HRM_CHIEF)
-
     def test_secretariat_cannot_view_or_queue_level2_without_override_even_if_misassigned(self):
         application = self.make_application(self.level2_position)
         self.verify_application_for_submission(application)
@@ -1021,6 +1023,48 @@ class WorkflowRoutingTests(BaseRecruitmentTestCase):
                 (RoutingHistory.RouteType.FORWARD, RecruitmentUser.Role.HRM_CHIEF),
             ],
         )
+
+    def test_secretariat_cannot_view_finalized_level2_case_without_authorized_basis(self):
+        application = self.make_application(self.level2_position)
+        self.move_application_to_appointing_review(application)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            self.record_final_decision_for_current_stage(
+                application,
+                self.appointing,
+                decision_outcome=FinalDecision.Outcome.NOT_SELECTED,
+                decision_notes="Finalize Level 2 case without Secretariat visibility.",
+            )
+
+        application.refresh_from_db()
+        application.case.refresh_from_db()
+
+        self.assertEqual(application.case.current_stage, RecruitmentCase.Stage.CLOSED)
+        self.assertFalse(user_can_view_application(self.secretariat, application))
+
+        client = Client()
+        client.force_login(self.secretariat)
+        response = client.get(reverse("application-detail", kwargs={"pk": application.pk}))
+        self.assertEqual(response.status_code, 404)
+
+    def test_override_is_limited_to_active_hrm_chief_review_stage(self):
+        application = self.make_application(self.level2_position)
+        self.move_application_to_hrmpsb_review(application)
+
+        with self.assertRaisesMessage(
+            ValueError,
+            "Secretariat overrides are only available while a Level 2 application is actively assigned to the HRM Chief review stage.",
+        ):
+            grant_secretariat_override(
+                application=application,
+                actor=self.sysadmin,
+                reason="Improper reroute attempt.",
+            )
+
+        application.refresh_from_db()
+        self.assertEqual(application.current_handler_role, RecruitmentUser.Role.HRMPSB_MEMBER)
+        self.assertEqual(application.case.current_stage, RecruitmentCase.Stage.HRMPSB_REVIEW)
+        self.assertFalse(WorkflowOverride.objects.filter(application=application).exists())
 
     def test_cos_skips_hrmpsb_stage(self):
         application = self.make_application(self.cos_position)
@@ -1077,51 +1121,75 @@ class RecruitmentCaseWorkflowTests(BaseRecruitmentTestCase):
         application.refresh_from_db()
         self.assertEqual(application.case.current_stage, RecruitmentCase.Stage.APPOINTING_AUTHORITY_REVIEW)
 
-    def test_closed_case_is_locked_and_can_be_reopened(self):
-        application = self.make_application(self.cos_position)
-        self.verify_application_for_submission(application)
-        submit_application(application, self.applicant)
-        self.finalize_screening_for_current_stage(application, self.secretariat)
-        process_workflow_action(application, self.secretariat, "endorse", "COS screening done.")
-        self.finalize_screening_for_current_stage(application, self.hrm_chief)
-        self.finalize_deliberation_for_current_stage(application, self.hrm_chief)
-        process_workflow_action(application, self.hrm_chief, "endorse", "COS endorsed.")
-        self.record_final_decision_for_current_stage(
-            application,
-            self.appointing,
-            decision_outcome=FinalDecision.Outcome.SELECTED,
-            decision_notes="Approved after appointing-authority review.",
-        )
-        application.refresh_from_db()
-
-        self.assertEqual(application.case.current_stage, RecruitmentCase.Stage.CLOSED)
-        self.assertEqual(application.case.case_status, RecruitmentCase.CaseStatus.APPROVED)
-        self.assertTrue(application.case.is_stage_locked)
-
-        with self.assertRaisesMessage(
-            ValueError,
-            "This recruitment case is stage-locked. Use controlled reopen before proceeding.",
-        ):
+        with self.captureOnCommitCallbacks(execute=True):
             self.record_final_decision_for_current_stage(
                 application,
                 self.appointing,
                 decision_outcome=FinalDecision.Outcome.SELECTED,
-                decision_notes="Duplicate approval.",
+                decision_notes="Approved for completion.",
             )
+        application.refresh_from_db()
+        self.assertEqual(application.case.current_stage, RecruitmentCase.Stage.COMPLETION)
+        self.assertEqual(application.status, RecruitmentApplication.Status.APPROVED)
+
+    def test_closed_case_is_locked_after_completion_and_can_be_reopened(self):
+        application = self.make_selected_application(self.cos_position)
 
         client = Client()
+        client.force_login(self.secretariat)
+        response = client.post(
+            reverse("completion-tracking", kwargs={"pk": application.pk}),
+            {
+                "completion_reference": "COS-CONTRACT-001",
+                "completion_date": timezone.localdate().isoformat(),
+                "deadline": (timezone.localdate() + timedelta(days=5)).isoformat(),
+                "remarks": "Contract requirements fully tracked.",
+                "completion_requirements-TOTAL_FORMS": "3",
+                "completion_requirements-INITIAL_FORMS": "0",
+                "completion_requirements-MIN_NUM_FORMS": "0",
+                "completion_requirements-MAX_NUM_FORMS": "1000",
+                "completion_requirements-0-item_label": "Signed contract",
+                "completion_requirements-0-status": CompletionRequirement.RequirementStatus.COMPLETED,
+                "completion_requirements-0-notes": "Submitted.",
+                "completion_requirements-1-item_label": "Government-issued ID",
+                "completion_requirements-1-status": CompletionRequirement.RequirementStatus.COMPLETED,
+                "completion_requirements-1-notes": "Verified.",
+                "completion_requirements-2-item_label": "",
+                "completion_requirements-2-status": CompletionRequirement.RequirementStatus.PENDING,
+                "completion_requirements-2-notes": "",
+            },
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+
+        response = client.post(
+            reverse("case-close", kwargs={"pk": application.pk}),
+            {"closure_notes": "Completion handling finished."},
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        application.refresh_from_db()
+        application.case.refresh_from_db()
+
+        self.assertEqual(application.case.current_stage, RecruitmentCase.Stage.CLOSED)
+        self.assertEqual(application.case.case_status, RecruitmentCase.CaseStatus.APPROVED)
+        self.assertTrue(application.case.is_stage_locked)
+        self.assertEqual(application.case.locked_stage, RecruitmentCase.Stage.COMPLETION)
+
         client.force_login(self.hrm_chief)
         response = client.post(
             reverse("workflow-reopen", kwargs={"pk": application.pk}),
-            {"reason": "Correcting the final review packet."},
+            {"reason": "Correcting the completion tracking record."},
             follow=True,
         )
 
         self.assertEqual(response.status_code, 200)
         application.refresh_from_db()
-        self.assertEqual(application.case.current_stage, RecruitmentCase.Stage.APPOINTING_AUTHORITY_REVIEW)
+        application.case.refresh_from_db()
+        self.assertEqual(application.case.current_stage, RecruitmentCase.Stage.COMPLETION)
         self.assertEqual(application.case.case_status, RecruitmentCase.CaseStatus.ACTIVE)
         self.assertFalse(application.case.is_stage_locked)
+        self.assertEqual(application.current_handler_role, RecruitmentUser.Role.SECRETARIAT)
         self.assertTrue(
             AuditLog.objects.filter(
                 application=application,
@@ -1138,12 +1206,10 @@ class RecruitmentCaseWorkflowTests(BaseRecruitmentTestCase):
         client.force_login(self.secretariat)
         response = client.get(reverse("application-detail", kwargs={"pk": application.pk}))
 
-        self.assertContains(response, "Recruitment Case")
-        self.assertContains(response, "Screening Record")
-        self.assertContains(response, "Examination Record")
-        self.assertContains(response, "Interview Sessions and Ratings")
-        self.assertContains(response, "Deliberation and Decision Support")
-        self.assertContains(response, "Routing History")
+        self.assertContains(response, "Case Workspace")
+        self.assertContains(response, "Qualification Screening")
+        self.assertContains(response, "Examination Management")
+        self.assertContains(response, "Workflow Snapshot")
         self.assertContains(response, "Case Timeline")
         self.assertContains(response, "Initial Routing")
         self.assertContains(response, "Case Created")
@@ -1404,33 +1470,6 @@ class ExamRecordTests(BaseRecruitmentTestCase):
                 finalize=False,
             )
 
-    def test_exam_record_must_link_to_the_same_application_case(self):
-        application = self.make_application(self.level1_position)
-        other_application = self.make_application(self.cos_position)
-        self.verify_application_for_submission(application)
-        self.verify_application_for_submission(other_application)
-        submit_application(application, self.applicant)
-        submit_application(other_application, self.applicant)
-
-        exam_record = ExamRecord(
-            application=application,
-            recruitment_case=other_application.case,
-            review_stage=application.case.current_stage,
-            recorded_by=self.secretariat,
-            branch=application.branch,
-            level=application.level,
-            exam_type="Technical Examination",
-            exam_status=ExamRecord.ExamStatus.COMPLETED,
-            exam_score="85.00",
-            exam_result="Passed",
-            exam_notes="Mismatched case linkage should fail.",
-        )
-
-        with self.assertRaises(ValidationError) as raised:
-            exam_record.full_clean()
-
-        self.assertIn("recruitment_case", raised.exception.message_dict)
-
     def test_unauthorized_user_cannot_record_exam(self):
         application = self.make_application(self.level1_position)
         self.verify_application_for_submission(application)
@@ -1459,6 +1498,913 @@ class ExamRecordTests(BaseRecruitmentTestCase):
             {**self.exam_payload(), "operation": "save"},
         )
         self.assertEqual(response.status_code, 403)
+
+
+class EvidenceVaultTests(BaseRecruitmentTestCase):
+    def test_evidence_is_encrypted_and_digest_is_stored_with_stage_metadata(self):
+        application = RecruitmentApplication.objects.create(
+            applicant=self.applicant,
+            position=self.level1_position,
+            qualification_summary="Qualified applicant.",
+        )
+        upload_evidence_item(
+            application=application,
+            actor=self.applicant,
+            label="Resume",
+            uploaded_file=SimpleUploadedFile(
+                "resume.txt",
+                b"plain-text resume",
+                content_type="text/plain",
+            ),
+        )
+
+        evidence = EvidenceVaultItem.objects.get(application=application)
+        self.assertNotEqual(bytes(evidence.ciphertext), b"plain-text resume")
+        self.assertEqual(len(evidence.sha256_digest), 64)
+        self.assertEqual(evidence.digest_algorithm, "sha256")
+        self.assertEqual(evidence.stage, EvidenceVaultItem.Stage.APPLICANT_INTAKE)
+        self.assertEqual(evidence.artifact_scope, EvidenceVaultItem.OwnerScope.APPLICATION)
+        self.assertEqual(evidence.application_id, application.id)
+        self.assertIsNone(evidence.recruitment_case_id)
+        self.assertIsNone(evidence.recruitment_entry_id)
+        self.assertEqual(evidence.version_number, 1)
+        self.assertTrue(evidence.is_current_version)
+        self.assertEqual(evidence.uploaded_by_role, RecruitmentUser.Role.APPLICANT)
+
+    def test_reuploading_same_label_preserves_version_history(self):
+        application = RecruitmentApplication.objects.create(
+            applicant=self.applicant,
+            position=self.level1_position,
+            qualification_summary="Qualified applicant.",
+        )
+        first_version = upload_evidence_item(
+            application=application,
+            actor=self.applicant,
+            label="Resume",
+            uploaded_file=SimpleUploadedFile(
+                "resume-v1.txt",
+                b"resume version one",
+                content_type="text/plain",
+            ),
+        )
+        second_version = upload_evidence_item(
+            application=application,
+            actor=self.applicant,
+            label="Resume",
+            uploaded_file=SimpleUploadedFile(
+                "resume-v2.txt",
+                b"resume version two",
+                content_type="text/plain",
+            ),
+        )
+
+        first_version.refresh_from_db()
+        second_version.refresh_from_db()
+        self.assertEqual(first_version.version_number, 1)
+        self.assertEqual(second_version.version_number, 2)
+        self.assertEqual(second_version.artifact_scope, EvidenceVaultItem.OwnerScope.APPLICATION)
+        self.assertEqual(first_version.version_family, second_version.version_family)
+        self.assertEqual(second_version.previous_version, first_version)
+        self.assertFalse(first_version.is_current_version)
+        self.assertTrue(second_version.is_current_version)
+        self.assertEqual(EvidenceVaultItem.objects.filter(application=application).count(), 2)
+
+    def test_internal_handler_can_download_uploaded_evidence(self):
+        application = self.make_application(self.level1_position)
+        self.verify_application_for_submission(application)
+        submit_application(application, self.applicant)
+        requirement_code = get_required_applicant_document_requirements()[0].code
+        evidence = EvidenceVaultItem.objects.get(
+            application=application,
+            artifact_scope=EvidenceVaultItem.OwnerScope.APPLICATION,
+            document_key=requirement_code,
+        )
+
+        client = Client()
+        client.force_login(self.secretariat)
+        response = client.get(
+            reverse(
+                "evidence-download",
+                kwargs={"pk": application.pk, "evidence_pk": evidence.pk},
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.content,
+            f"sample:{requirement_code}".encode("utf-8"),
+        )
+        self.assertTrue(
+            AuditLog.objects.filter(
+                application=application,
+                action=AuditLog.Action.EVIDENCE_DOWNLOADED,
+                metadata__evidence_id=evidence.id,
+            ).exists()
+        )
+
+    def test_evidence_service_rejects_unauthorized_upload_actor(self):
+        application = self.make_application(self.level1_position)
+        self.verify_application_for_submission(application)
+        submit_application(application, self.applicant)
+
+        with self.assertRaisesMessage(
+            ValueError,
+            "You cannot upload evidence for this application.",
+        ):
+            upload_evidence_item(
+                application=application,
+                actor=self.hrmpsb,
+                label="Late Submission",
+                uploaded_file=SimpleUploadedFile(
+                    "late.txt",
+                    b"late evidence",
+                    content_type="text/plain",
+                ),
+            )
+
+    def test_case_owned_workflow_evidence_uses_recruitment_case_owner(self):
+        application = self.make_application(self.level1_position)
+        self.verify_application_for_submission(application)
+        submit_application(application, self.applicant)
+        application.refresh_from_db()
+
+        evidence = upload_evidence_item(
+            application=application,
+            actor=self.secretariat,
+            label="Secretariat Routing Notes",
+            uploaded_file=SimpleUploadedFile(
+                "routing-notes.txt",
+                b"internal routing notes",
+                content_type="text/plain",
+            ),
+            artifact_scope=EvidenceVaultItem.OwnerScope.CASE,
+            artifact_type="workflow_evidence",
+        )
+
+        self.assertEqual(evidence.artifact_scope, EvidenceVaultItem.OwnerScope.CASE)
+        self.assertIsNone(evidence.application_id)
+        self.assertEqual(evidence.recruitment_case_id, application.case.id)
+        self.assertIsNone(evidence.recruitment_entry_id)
+
+    def test_evidence_vault_search_hides_inaccessible_cases_and_filters_archived_items(self):
+        accessible_application = self.make_application(self.level1_position)
+        self.verify_application_for_submission(accessible_application)
+        submit_application(accessible_application, self.applicant)
+        accessible_application.refresh_from_db()
+        accessible_evidence = EvidenceVaultItem.objects.get(
+            application=accessible_application,
+            artifact_scope=EvidenceVaultItem.OwnerScope.APPLICATION,
+            document_key=get_required_applicant_document_requirements()[0].code,
+        )
+
+        inaccessible_application = RecruitmentApplication.objects.create(
+            applicant=self.applicant,
+            position=self.level2_position,
+            applicant_first_name="Hidden",
+            applicant_last_name="Applicant",
+            applicant_email="hidden@example.com",
+            applicant_phone="09170000000",
+            checklist_privacy_consent=True,
+            checklist_documents_complete=True,
+            checklist_information_certified=True,
+            qualification_summary="Hidden application.",
+        )
+        self.upload_required_applicant_documents(
+            inaccessible_application,
+            self.applicant,
+            content_prefix="hidden",
+        )
+        self.verify_application_for_submission(inaccessible_application)
+        submit_application(inaccessible_application, self.applicant)
+
+        client = Client()
+        client.force_login(self.secretariat)
+
+        initial_response = client.get(
+            reverse("evidence-vault-list"),
+            {
+                "q": "Personal Data Sheet",
+                "archival_status": "all",
+            },
+        )
+        self.assertEqual(initial_response.status_code, 200)
+        self.assertContains(initial_response, accessible_application.reference_label)
+        self.assertNotContains(initial_response, inaccessible_application.reference_label)
+
+        archive_response = client.post(
+            reverse(
+                "evidence-archive-toggle",
+                kwargs={"pk": accessible_application.pk, "evidence_pk": accessible_evidence.pk},
+            ),
+            {
+                "action": "archive",
+                "archive_tag": "Closed case retention batch",
+                "next": reverse("evidence-vault-list"),
+            },
+            follow=True,
+        )
+        self.assertEqual(archive_response.status_code, 200)
+        accessible_evidence.refresh_from_db()
+        self.assertTrue(accessible_evidence.is_archived)
+        self.assertEqual(accessible_evidence.archive_tag, "Closed case retention batch")
+        self.assertTrue(
+            AuditLog.objects.filter(
+                application=accessible_application,
+                action=AuditLog.Action.EVIDENCE_ARCHIVED,
+                metadata__evidence_id=accessible_evidence.id,
+            ).exists()
+        )
+
+        archived_response = client.get(
+            reverse("evidence-vault-list"),
+            {
+                "q": accessible_application.reference_label,
+                "archival_status": "archived",
+                "current_version_only": "",
+            },
+        )
+        self.assertEqual(archived_response.status_code, 200)
+        self.assertContains(archived_response, "Closed case retention batch")
+        self.assertContains(archived_response, accessible_application.reference_label)
+
+
+class ViewAndExportTests(BaseRecruitmentTestCase):
+    def test_applicant_user_cannot_access_internal_dashboard(self):
+        client = Client()
+        client.force_login(self.applicant)
+        response = client.get(reverse("dashboard"))
+        self.assertEqual(response.status_code, 403)
+
+    def test_applicant_user_cannot_access_internal_application_detail(self):
+        other_applicant = User.objects.create_user(
+            username="otherapplicant",
+            password="testpass123",
+            role=RecruitmentUser.Role.APPLICANT,
+        )
+        application = RecruitmentApplication.objects.create(
+            applicant=other_applicant,
+            position=self.level1_position,
+            qualification_summary="Another applicant.",
+        )
+
+        client = Client()
+        client.force_login(self.applicant)
+        response = client.get(reverse("application-detail", kwargs={"pk": application.pk}))
+        self.assertEqual(response.status_code, 403)
+
+    def test_export_bundle_returns_structured_zip_with_inventory_and_verification_outputs(self):
+        application = self.make_application(self.level2_position)
+        self.verify_application_for_submission(application)
+        submit_application(application, self.applicant)
+        application.refresh_from_db()
+
+        client = Client()
+        client.force_login(self.hrm_chief)
+        response = client.get(reverse("application-export", kwargs={"pk": application.pk}))
+        self.assertEqual(response.status_code, 200)
+        archive = zipfile.ZipFile(io.BytesIO(response.content))
+        names = set(archive.namelist())
+        root = f"{application.reference_number}/"
+        self.assertIn(f"{root}records/application_summary.pdf", names)
+        self.assertIn(f"{root}records/submission_packet.json", names)
+        self.assertIn(f"{root}records/case_manifest.json", names)
+        self.assertIn(f"{root}inventory/evidence_inventory.csv", names)
+        self.assertIn(f"{root}inventory/evidence_inventory.pdf", names)
+        self.assertIn(f"{root}logs/audit_log.csv", names)
+        self.assertIn(f"{root}logs/routing_history.csv", names)
+        self.assertIn(f"{root}verification/verification_report.json", names)
+        self.assertIn(f"{root}verification/checksums.sha256", names)
+        self.assertIn(f"{root}verification/verification_summary.pdf", names)
+        evidence_paths = [name for name in names if name.startswith(f"{root}evidence/")]
+        self.assertTrue(evidence_paths)
+
+        manifest = json.loads(archive.read(f"{root}records/case_manifest.json").decode("utf-8"))
+        verification_report = json.loads(
+            archive.read(f"{root}verification/verification_report.json").decode("utf-8")
+        )
+        audit_log_csv = archive.read(f"{root}logs/audit_log.csv").decode("utf-8")
+        inventory_csv = archive.read(f"{root}inventory/evidence_inventory.csv").decode("utf-8")
+        checksums = archive.read(f"{root}verification/checksums.sha256").decode("utf-8")
+        required_document_count = len(get_required_applicant_document_requirements())
+
+        self.assertEqual(manifest["source_application"]["id"], application.id)
+        self.assertEqual(manifest["source_case"]["id"], application.case.id)
+        self.assertEqual(manifest["export"]["bundle_root"], root)
+        self.assertEqual(manifest["export"]["evidence_file_count"], required_document_count)
+        self.assertEqual(
+            manifest["bundle_contents"]["verification_paths"],
+            [
+                f"{root}verification/verification_report.json",
+                f"{root}verification/checksums.sha256",
+                f"{root}verification/verification_summary.pdf",
+            ],
+        )
+        self.assertEqual(verification_report["case_reference"], application.reference_number)
+        self.assertEqual(verification_report["source_case_id"], application.case.id)
+        self.assertEqual(verification_report["evidence_file_count"], required_document_count)
+        self.assertTrue(all(item["digest_match"] for item in verification_report["evidence_files"]))
+        self.assertTrue(
+            any(
+                covered["path"] == evidence_paths[0]
+                for covered in verification_report["covered_files"]
+            )
+        )
+        self.assertIn("case_reference,workflow_stage,actor,actor_role,action,is_sensitive_access", audit_log_csv)
+        self.assertIn("stored_sha256_digest,exported_sha256_digest,digest_match", inventory_csv)
+        self.assertIn(evidence_paths[0], inventory_csv)
+        self.assertIn(evidence_paths[0], checksums)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                application=application,
+                action=AuditLog.Action.EXPORT_GENERATED,
+            ).exists()
+        )
+        export_log = AuditLog.objects.get(
+            application=application,
+            action=AuditLog.Action.EXPORT_GENERATED,
+        )
+        self.assertEqual(export_log.metadata["bundle_root"], root)
+        self.assertEqual(export_log.metadata["source_case_id"], application.case.id)
+        self.assertEqual(export_log.metadata["evidence_item_count"], required_document_count)
+
+    def test_export_bundle_preserves_application_case_and_entry_scoped_artifacts(self):
+        application = self.make_application(self.level1_position)
+        self.move_application_to_appointing_review(application)
+
+        upload_evidence_item(
+            application=application,
+            actor=self.appointing,
+            label="Appointing Review Notes",
+            uploaded_file=SimpleUploadedFile(
+                "appointing-notes.txt",
+                b"appointing review notes",
+                content_type="text/plain",
+            ),
+            artifact_scope=EvidenceVaultItem.OwnerScope.CASE,
+            artifact_type="workflow_evidence",
+        )
+
+        bundle_bytes = build_export_bundle(application, self.appointing)
+        archive = zipfile.ZipFile(io.BytesIO(bundle_bytes))
+        root = f"{application.reference_number}/"
+        manifest = json.loads(archive.read(f"{root}records/case_manifest.json").decode("utf-8"))
+
+        scopes = {item["artifact_scope"] for item in manifest["evidence"]}
+        artifact_types = {item["artifact_type"] for item in manifest["evidence"]}
+
+        self.assertEqual(scopes, {"application", "case", "entry"})
+        self.assertIn("applicant_document", artifact_types)
+        self.assertIn("workflow_evidence", artifact_types)
+        self.assertIn("comparative_assessment_report", artifact_types)
+        self.assertTrue(any(item["artifact_scope"] == "entry" for item in manifest["evidence"]))
+        self.assertTrue(any(item["artifact_scope"] == "case" for item in manifest["evidence"]))
+        self.assertTrue(any(item["artifact_scope"] == "application" for item in manifest["evidence"]))
+
+    def test_secretariat_can_export_level1_case_when_they_can_view_it(self):
+        application = self.make_application(self.level1_position)
+        self.verify_application_for_submission(application)
+        submit_application(application, self.applicant)
+
+        client = Client()
+        client.force_login(self.secretariat)
+        response = client.get(reverse("application-export", kwargs={"pk": application.pk}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/zip")
+
+    def test_non_export_role_cannot_access_controlled_export(self):
+        application = self.make_application(self.level1_position)
+        self.verify_application_for_submission(application)
+        submit_application(application, self.applicant)
+
+        client = Client()
+        client.force_login(self.hrmpsb)
+        response = client.get(reverse("application-export", kwargs={"pk": application.pk}))
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_export_service_rejects_unauthorized_actor(self):
+        application = self.make_application(self.level1_position)
+        self.verify_application_for_submission(application)
+        submit_application(application, self.applicant)
+
+        with self.assertRaisesMessage(
+            ValueError,
+            "You cannot export this application.",
+        ):
+            build_export_bundle(application, self.hrmpsb)
+
+
+class AuditLoggingTraceabilityTests(BaseRecruitmentTestCase):
+    def make_submitted_application(self, position=None):
+        application = self.make_application(position or self.level1_position)
+        self.verify_application_for_submission(application)
+        submit_application(application, self.applicant)
+        application.refresh_from_db()
+        return application
+
+    def test_submission_audit_log_stores_traceability_fields(self):
+        application = self.make_submitted_application()
+
+        log = AuditLog.objects.get(
+            application=application,
+            action=AuditLog.Action.APPLICATION_SUBMITTED,
+        )
+
+        self.assertEqual(log.actor, self.applicant)
+        self.assertEqual(log.actor_role, RecruitmentUser.Role.APPLICANT)
+        self.assertEqual(log.case_reference, application.reference_number)
+        self.assertEqual(log.workflow_stage, RecruitmentCase.Stage.SECRETARIAT_REVIEW)
+        self.assertFalse(log.is_sensitive_access)
+
+    def test_application_detail_view_logs_sensitive_record_access(self):
+        application = self.make_submitted_application()
+
+        client = Client()
+        client.force_login(self.secretariat)
+        response = client.get(reverse("application-detail", kwargs={"pk": application.pk}))
+
+        self.assertEqual(response.status_code, 200)
+        log = AuditLog.objects.filter(
+            application=application,
+            actor=self.secretariat,
+            action=AuditLog.Action.PROTECTED_RECORD_VIEWED,
+        ).latest("created_at")
+        self.assertTrue(log.is_sensitive_access)
+        self.assertEqual(log.workflow_stage, RecruitmentCase.Stage.SECRETARIAT_REVIEW)
+        self.assertEqual(log.metadata["access_source"], "application_detail")
+
+    def test_authorized_case_audit_review_is_available_and_logged(self):
+        application = self.make_submitted_application()
+
+        client = Client()
+        client.force_login(self.secretariat)
+        response = client.get(reverse("application-audit-log", kwargs={"pk": application.pk}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Application Audit Trail")
+        log = AuditLog.objects.filter(
+            application=application,
+            actor=self.secretariat,
+            action=AuditLog.Action.AUDIT_LOG_VIEWED,
+        ).latest("created_at")
+        self.assertTrue(log.is_sensitive_access)
+        self.assertEqual(log.metadata["review_scope"], "application_audit")
+
+    def test_evidence_vault_review_logs_sensitive_access(self):
+        self.make_submitted_application()
+
+        client = Client()
+        client.force_login(self.secretariat)
+        response = client.get(reverse("evidence-vault-list"))
+
+        self.assertEqual(response.status_code, 200)
+        log = AuditLog.objects.filter(
+            application__isnull=True,
+            actor=self.secretariat,
+            action=AuditLog.Action.EVIDENCE_VAULT_VIEWED,
+        ).latest("created_at")
+        self.assertTrue(log.is_sensitive_access)
+
+    def test_system_admin_cannot_review_case_audit_without_case_visibility(self):
+        application = self.make_submitted_application()
+
+        client = Client()
+        client.force_login(self.sysadmin)
+        response = client.get(reverse("application-audit-log", kwargs={"pk": application.pk}))
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_system_admin_can_review_system_audit_logs_only(self):
+        record_system_audit_event(
+            actor=self.sysadmin,
+            action=AuditLog.Action.PASSWORD_CHANGED,
+            description="System administrator changed a password.",
+            metadata={"target_user_id": self.secretariat.id},
+        )
+
+        client = Client()
+        client.force_login(self.sysadmin)
+        response = client.get(reverse("audit-log-list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "System Audit Logs")
+        self.assertContains(response, "Password Changed")
+        self.assertFalse(response.context["audit_logs"][0].application_id if response.context["audit_logs"] else False)
+        log = AuditLog.objects.filter(
+            application__isnull=True,
+            actor=self.sysadmin,
+            action=AuditLog.Action.AUDIT_LOG_VIEWED,
+        ).latest("created_at")
+        self.assertTrue(log.is_sensitive_access)
+        self.assertEqual(log.metadata["review_scope"], "system_audit")
+
+    def test_traceability_backfill_handles_draft_logs_without_reference_numbers(self):
+        migration_module = importlib.import_module(
+            "recruitment.migrations.0014_auditlog_traceability_fields"
+        )
+        application = self.make_application(self.level1_position)
+        log = AuditLog.objects.create(
+            application=application,
+            actor=self.applicant,
+            actor_role="",
+            case_reference="",
+            workflow_stage="",
+            action=AuditLog.Action.APPLICATION_CREATED,
+            description="Applicant created a draft application.",
+            metadata={"review_stage": RecruitmentCase.Stage.SECRETARIAT_REVIEW},
+            is_sensitive_access=False,
+        )
+
+        migration_module.backfill_audit_log_traceability(django_apps, None)
+
+        log.refresh_from_db()
+        self.assertEqual(log.actor_role, RecruitmentUser.Role.APPLICANT)
+        self.assertEqual(log.case_reference, "")
+        self.assertEqual(log.workflow_stage, RecruitmentCase.Stage.SECRETARIAT_REVIEW)
+        self.assertFalse(log.is_sensitive_access)
+
+
+class NotificationManagementTests(BaseRecruitmentTestCase):
+    def make_submitted_application(self, position=None):
+        application = self.make_application(position or self.level1_position)
+        self.verify_application_for_submission(application)
+        with self.captureOnCommitCallbacks(execute=True):
+            submit_application(application, self.applicant)
+        application.refresh_from_db()
+        return application
+
+    def make_approved_cos_application(self):
+        return self.make_selected_application(self.cos_position)
+
+    def make_approved_level2_plantilla_application(self):
+        return self.make_selected_application(self.level2_position)
+
+    def test_submission_acknowledgment_notification_is_sent_and_stored(self):
+        application = self.make_application(self.level1_position)
+        self.verify_application_for_submission(application)
+        mail.outbox.clear()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            submit_application(application, self.applicant)
+
+        application.refresh_from_db()
+        notification = NotificationLog.objects.get(
+            application=application,
+            notification_type=NotificationLog.NotificationType.SUBMISSION_ACKNOWLEDGMENT,
+        )
+        self.assertEqual(notification.delivery_status, NotificationLog.DeliveryStatus.SENT)
+        self.assertIsNotNone(notification.sent_at)
+        self.assertEqual(notification.recipient_email, "applicant@example.com")
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn(application.reference_number, mail.outbox[0].subject)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                application=application,
+                action=AuditLog.Action.NOTIFICATION_SENT,
+                metadata__notification_type=NotificationLog.NotificationType.SUBMISSION_ACKNOWLEDGMENT,
+            ).exists()
+        )
+
+    def test_approval_sends_selected_applicant_notification(self):
+        application = self.make_application(self.cos_position)
+        self.verify_application_for_submission(application)
+        with self.captureOnCommitCallbacks(execute=True):
+            submit_application(application, self.applicant)
+        mail.outbox.clear()
+
+        self.finalize_screening_for_current_stage(application, self.secretariat)
+        process_workflow_action(application, self.secretariat, "endorse", "COS screening done.")
+        self.finalize_screening_for_current_stage(application, self.hrm_chief)
+        self.finalize_deliberation_for_current_stage(application, self.hrm_chief)
+        process_workflow_action(application, self.hrm_chief, "endorse", "COS endorsed.")
+
+        with self.captureOnCommitCallbacks(execute=True):
+            self.record_final_decision_for_current_stage(
+                application,
+                self.appointing,
+                decision_outcome=FinalDecision.Outcome.SELECTED,
+                decision_notes="Approved.",
+            )
+
+        application.refresh_from_db()
+        notification = NotificationLog.objects.get(
+            application=application,
+            notification_type=NotificationLog.NotificationType.SELECTED_APPLICANT,
+        )
+        self.assertEqual(application.status, RecruitmentApplication.Status.APPROVED)
+        self.assertEqual(application.case.current_stage, RecruitmentCase.Stage.COMPLETION)
+        self.assertEqual(application.current_handler_role, RecruitmentUser.Role.SECRETARIAT)
+        self.assertEqual(notification.delivery_status, NotificationLog.DeliveryStatus.SENT)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("selection result", mail.outbox[0].subject.lower())
+        self.assertIn("COS", mail.outbox[0].body)
+
+    def test_rejection_sends_non_selected_applicant_notification(self):
+        application = self.make_submitted_application()
+        mail.outbox.clear()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            process_workflow_action(application, self.secretariat, "reject", "Rejected at Secretariat.")
+
+        application.refresh_from_db()
+        notification = NotificationLog.objects.get(
+            application=application,
+            notification_type=NotificationLog.NotificationType.NON_SELECTED_APPLICANT,
+        )
+        self.assertEqual(application.status, RecruitmentApplication.Status.REJECTED)
+        self.assertEqual(notification.delivery_status, NotificationLog.DeliveryStatus.SENT)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("non-selection notice", mail.outbox[0].subject.lower())
+
+    def test_secretariat_can_send_requirement_checklist_notification_for_level1_completion(self):
+        application = self.make_approved_cos_application()
+        mail.outbox.clear()
+        client = Client()
+        client.force_login(self.secretariat)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = client.post(
+                reverse("notification-checklist", kwargs={"pk": application.pk}),
+                {
+                    "checklist_items": "- Signed contract\n- Government-issued ID",
+                    "deadline": (timezone.localdate() + timedelta(days=7)).isoformat(),
+                    "additional_message": "Bring original copies during submission.",
+                },
+                follow=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        notification = NotificationLog.objects.filter(
+            application=application,
+            notification_type=NotificationLog.NotificationType.REQUIREMENT_CHECKLIST,
+        ).latest("created_at")
+        self.assertEqual(notification.delivery_status, NotificationLog.DeliveryStatus.SENT)
+        self.assertEqual(notification.triggered_by, self.secretariat)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertContains(response, "Requirement Checklist Notification")
+        self.assertContains(response, notification.subject)
+
+    def test_secretariat_cannot_send_requirement_checklist_before_selection(self):
+        application = self.make_submitted_application()
+        client = Client()
+        client.force_login(self.secretariat)
+
+        response = client.post(
+            reverse("notification-checklist", kwargs={"pk": application.pk}),
+            {
+                "checklist_items": "- Any requirement",
+                "deadline": (timezone.localdate() + timedelta(days=5)).isoformat(),
+                "additional_message": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_hrm_chief_can_send_reminder_notification_for_level2_completion(self):
+        application = self.make_approved_level2_plantilla_application()
+        mail.outbox.clear()
+        client = Client()
+        client.force_login(self.hrm_chief)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = client.post(
+                reverse("notification-reminder", kwargs={"pk": application.pk}),
+                {
+                    "reminder_subject": "Follow-up reminder for completion documents",
+                    "reminder_message": "Please submit the remaining completion documents this week.",
+                    "deadline": (timezone.localdate() + timedelta(days=3)).isoformat(),
+                },
+                follow=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        notification = NotificationLog.objects.filter(
+            application=application,
+            notification_type=NotificationLog.NotificationType.REMINDER,
+        ).latest("created_at")
+        self.assertEqual(notification.delivery_status, NotificationLog.DeliveryStatus.SENT)
+        self.assertEqual(notification.triggered_by, self.hrm_chief)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertContains(response, "Reminder Notification")
+
+
+class CompletionTrackingTests(BaseRecruitmentTestCase):
+    def completion_payload(self, items, **overrides):
+        payload = {
+            "completion_reference": "COMP-001",
+            "completion_date": timezone.localdate().isoformat(),
+            "deadline": (timezone.localdate() + timedelta(days=7)).isoformat(),
+            "remarks": "Completion tracking updated.",
+        }
+        payload.update(overrides)
+        total_forms = len(items) + 1
+        payload.update(
+            {
+                "completion_requirements-TOTAL_FORMS": str(total_forms),
+                "completion_requirements-INITIAL_FORMS": "0",
+                "completion_requirements-MIN_NUM_FORMS": "0",
+                "completion_requirements-MAX_NUM_FORMS": "1000",
+            }
+        )
+        for index, item in enumerate(items):
+            payload[f"completion_requirements-{index}-item_label"] = item["item_label"]
+            payload[f"completion_requirements-{index}-status"] = item["status"]
+            payload[f"completion_requirements-{index}-notes"] = item.get("notes", "")
+        payload[f"completion_requirements-{len(items)}-item_label"] = ""
+        payload[f"completion_requirements-{len(items)}-status"] = CompletionRequirement.RequirementStatus.PENDING
+        payload[f"completion_requirements-{len(items)}-notes"] = ""
+        return payload
+
+    def test_plantilla_completion_tracking_stores_announcement_and_requirement_statuses(self):
+        application = self.make_selected_application(self.level1_position)
+        client = Client()
+        client.force_login(self.secretariat)
+
+        response = client.post(
+            reverse("completion-tracking", kwargs={"pk": application.pk}),
+            self.completion_payload(
+                [
+                    {
+                        "item_label": "Signed appointment paper",
+                        "status": CompletionRequirement.RequirementStatus.COMPLETED,
+                        "notes": "Validated by Secretariat.",
+                    },
+                    {
+                        "item_label": "Medical certificate",
+                        "status": CompletionRequirement.RequirementStatus.PENDING,
+                        "notes": "Awaiting submission.",
+                    },
+                ],
+                completion_reference="PLANTILLA-APPT-001",
+                announcement_reference="ANN-PL-2026-001",
+                announcement_date=timezone.localdate().isoformat(),
+                remarks="Appointment completion tracking started.",
+            ),
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        record = CompletionRecord.objects.get(application=application)
+        self.assertEqual(record.branch, PositionPosting.Branch.PLANTILLA)
+        self.assertEqual(record.completion_reference, "PLANTILLA-APPT-001")
+        self.assertEqual(record.announcement_reference, "ANN-PL-2026-001")
+        self.assertEqual(record.total_requirement_count, 2)
+        self.assertTrue(
+            record.requirements.filter(
+                item_label="Signed appointment paper",
+                status=CompletionRequirement.RequirementStatus.COMPLETED,
+            ).exists()
+        )
+        self.assertTrue(
+            AuditLog.objects.filter(
+                application=application,
+                action=AuditLog.Action.COMPLETION_RECORDED,
+                metadata__completion_record_id=record.id,
+            ).exists()
+        )
+
+    def test_cos_completion_tracking_ignores_announcement_fields_and_preserves_requirements(self):
+        application = self.make_selected_application(self.cos_position)
+        client = Client()
+        client.force_login(self.secretariat)
+
+        response = client.post(
+            reverse("completion-tracking", kwargs={"pk": application.pk}),
+            self.completion_payload(
+                [
+                    {
+                        "item_label": "Signed contract",
+                        "status": CompletionRequirement.RequirementStatus.COMPLETED,
+                        "notes": "Contract received.",
+                    },
+                    {
+                        "item_label": "Government-issued ID",
+                        "status": CompletionRequirement.RequirementStatus.NOT_APPLICABLE,
+                        "notes": "Existing verified copy reused.",
+                    },
+                ],
+                completion_reference="COS-CONTRACT-2026-001",
+                announcement_reference="SHOULD-NOT-SAVE",
+                announcement_date=timezone.localdate().isoformat(),
+                remarks="COS contract completion tracking started.",
+            ),
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        record = CompletionRecord.objects.get(application=application)
+        self.assertEqual(record.branch, PositionPosting.Branch.COS)
+        self.assertEqual(record.completion_reference, "COS-CONTRACT-2026-001")
+        self.assertEqual(record.announcement_reference, "")
+        self.assertIsNone(record.announcement_date)
+        self.assertEqual(record.total_requirement_count, 2)
+        self.assertTrue(record.requirements_ready_for_closure)
+
+    def test_case_close_requires_resolved_completion_requirements(self):
+        application = self.make_selected_application(self.cos_position)
+        client = Client()
+        client.force_login(self.secretariat)
+
+        client.post(
+            reverse("completion-tracking", kwargs={"pk": application.pk}),
+            self.completion_payload(
+                [
+                    {
+                        "item_label": "Signed contract",
+                        "status": CompletionRequirement.RequirementStatus.COMPLETED,
+                        "notes": "Submitted.",
+                    },
+                    {
+                        "item_label": "Tax form",
+                        "status": CompletionRequirement.RequirementStatus.PENDING,
+                        "notes": "Still pending.",
+                    },
+                ],
+                completion_reference="COS-CONTRACT-LOCK",
+            ),
+            follow=True,
+        )
+
+        response = client.post(
+            reverse("case-close", kwargs={"pk": application.pk}),
+            {"closure_notes": "Trying to close too early."},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "All completion requirements must be marked completed or not applicable before closing the case.",
+        )
+        application.refresh_from_db()
+        application.case.refresh_from_db()
+        self.assertEqual(application.case.current_stage, RecruitmentCase.Stage.COMPLETION)
+        self.assertFalse(
+            AuditLog.objects.filter(
+                application=application,
+                action=AuditLog.Action.CASE_CLOSED,
+            ).exists()
+        )
+
+    def test_case_close_locks_case_and_closed_case_remains_retrievable(self):
+        application = self.make_selected_application(self.level2_position)
+        client = Client()
+        client.force_login(self.hrm_chief)
+
+        client.post(
+            reverse("completion-tracking", kwargs={"pk": application.pk}),
+            self.completion_payload(
+                [
+                    {
+                        "item_label": "Signed appointment paper",
+                        "status": CompletionRequirement.RequirementStatus.COMPLETED,
+                        "notes": "Filed.",
+                    },
+                    {
+                        "item_label": "Medical clearance",
+                        "status": CompletionRequirement.RequirementStatus.NOT_APPLICABLE,
+                        "notes": "Waived under recorded office rule.",
+                    },
+                ],
+                completion_reference="PL2-APPT-001",
+                announcement_reference="ANN-PL2-001",
+                announcement_date=timezone.localdate().isoformat(),
+                remarks="Ready for case closure.",
+            ),
+            follow=True,
+        )
+
+        response = client.post(
+            reverse("case-close", kwargs={"pk": application.pk}),
+            {"closure_notes": "Completion handling finished and archived."},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        application.refresh_from_db()
+        application.case.refresh_from_db()
+        self.assertEqual(application.case.current_stage, RecruitmentCase.Stage.CLOSED)
+        self.assertEqual(application.case.case_status, RecruitmentCase.CaseStatus.APPROVED)
+        self.assertTrue(application.case.is_stage_locked)
+        self.assertEqual(application.case.locked_stage, RecruitmentCase.Stage.COMPLETION)
+        self.assertEqual(application.current_handler_role, "")
+        self.assertTrue(
+            AuditLog.objects.filter(
+                application=application,
+                action=AuditLog.Action.CASE_CLOSED,
+            ).exists()
+        )
+        self.assertTrue(
+            RoutingHistory.objects.filter(
+                application=application,
+                route_type=RoutingHistory.RouteType.CLOSE,
+            ).exists()
+        )
+
+        detail_response = client.get(reverse("application-detail", kwargs={"pk": application.pk}))
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertContains(detail_response, "Completion Tracking")
 
 
 class InterviewManagementTests(BaseRecruitmentTestCase):
@@ -1499,32 +2445,25 @@ class InterviewManagementTests(BaseRecruitmentTestCase):
                 b"scanned fallback rating sheet",
                 content_type="application/pdf",
             ),
-            remarks="Scanned panel sheet captured during Secretariat-stage coordination.",
+            remarks="Fallback sheet retained for manual panel scoring.",
         )
         interview_session = save_interview_session(
             application=application,
             actor=self.secretariat,
             cleaned_data=self.session_payload(
                 location="Secretariat Coordination Room",
-                session_notes="Fallback rating sheet preserved for this stage.",
+                session_notes="Session locked after fallback upload.",
             ),
             finalize=True,
         )
 
         self.assertTrue(interview_session.is_finalized)
         self.assertEqual(interview_session.review_stage, RecruitmentCase.Stage.SECRETARIAT_REVIEW)
-        self.assertEqual(fallback_evidence.recruitment_case, application.case)
-        self.assertEqual(fallback_evidence.workflow_stage, RecruitmentCase.Stage.SECRETARIAT_REVIEW)
+        self.assertEqual(fallback_evidence.stage, RecruitmentCase.Stage.SECRETARIAT_REVIEW)
         self.assertTrue(
             AuditLog.objects.filter(
                 application=application,
                 action=AuditLog.Action.INTERVIEW_FALLBACK_UPLOADED,
-            ).exists()
-        )
-        self.assertTrue(
-            AuditLog.objects.filter(
-                application=application,
-                action=AuditLog.Action.INTERVIEW_FINALIZED,
             ).exists()
         )
 
@@ -1535,7 +2474,7 @@ class InterviewManagementTests(BaseRecruitmentTestCase):
         interview_session = save_interview_session(
             application=application,
             actor=self.hrm_chief,
-            cleaned_data=self.session_payload(location="Virtual Panel Room"),
+            cleaned_data=self.session_payload(location="Virtual Interview Room"),
             finalize=False,
         )
         interview_rating = save_interview_rating(
@@ -1547,13 +2486,12 @@ class InterviewManagementTests(BaseRecruitmentTestCase):
             application=application,
             actor=self.hrm_chief,
             cleaned_data=self.session_payload(
-                location="Virtual Panel Room",
+                location="Virtual Interview Room",
                 session_notes="Direct HRM Chief interview rating finalized.",
             ),
             finalize=True,
         )
 
-        self.assertEqual(interview_session.review_stage, RecruitmentCase.Stage.HRM_CHIEF_REVIEW)
         self.assertTrue(interview_session.is_finalized)
         self.assertEqual(interview_rating.rated_by, self.hrm_chief)
         self.assertEqual(str(interview_rating.rating_score), "91.25")
@@ -1564,50 +2502,11 @@ class InterviewManagementTests(BaseRecruitmentTestCase):
             ).exists()
         )
 
-    def test_rating_below_threshold_requires_justification(self):
-        application = self.make_application(self.cos_position)
-        self.move_application_to_hrm_chief_review(application)
-        save_interview_session(
-            application=application,
-            actor=self.hrm_chief,
-            cleaned_data=self.session_payload(),
-            finalize=False,
-        )
-
-        with self.assertRaises(ValidationError):
-            save_interview_rating(
-                application=application,
-                actor=self.hrm_chief,
-                cleaned_data=self.rating_payload(
-                    rating_score="70.00",
-                    justification="",
-                ),
-            )
-
-    def test_hrmpsb_member_can_record_interview_rating_for_plantilla_stage(self):
-        application = self.make_application(self.level1_position)
-        self.move_application_to_hrmpsb_review(application)
-
-        interview_session = save_interview_session(
-            application=application,
-            actor=self.hrmpsb,
-            cleaned_data=self.session_payload(location="HRMPSB Deliberation Room"),
-            finalize=False,
-        )
-        interview_rating = save_interview_rating(
-            application=application,
-            actor=self.hrmpsb,
-            cleaned_data=self.rating_payload(rating_score="87.00"),
-        )
-
-        self.assertEqual(interview_session.review_stage, RecruitmentCase.Stage.HRMPSB_REVIEW)
-        self.assertEqual(interview_rating.review_stage, RecruitmentCase.Stage.HRMPSB_REVIEW)
-        self.assertEqual(interview_rating.rated_by, self.hrmpsb)
-
     def test_finalized_interview_session_blocks_session_rating_and_fallback_changes(self):
         application = self.make_application(self.cos_position)
         self.move_application_to_hrm_chief_review(application)
-        interview_session = save_interview_session(
+
+        save_interview_session(
             application=application,
             actor=self.hrm_chief,
             cleaned_data=self.session_payload(),
@@ -1627,25 +2526,13 @@ class InterviewManagementTests(BaseRecruitmentTestCase):
 
         with self.assertRaisesMessage(
             ValueError,
-            "Finalized interview sessions are locked and cannot be modified.",
-        ):
-            save_interview_session(
-                application=application,
-                actor=self.hrm_chief,
-                cleaned_data=self.session_payload(location="Changed after lock"),
-                finalize=False,
-            )
-
-        with self.assertRaisesMessage(
-            ValueError,
             "Finalized interview sessions are locked and cannot accept rating changes.",
         ):
             save_interview_rating(
                 application=application,
                 actor=self.hrm_chief,
-                cleaned_data=self.rating_payload(rating_score="95.00"),
+                cleaned_data=self.rating_payload(rating_score="90.00"),
             )
-
         with self.assertRaisesMessage(
             ValueError,
             "Finalized interview sessions are locked and cannot accept fallback rating uploads.",
@@ -1653,66 +2540,19 @@ class InterviewManagementTests(BaseRecruitmentTestCase):
             upload_interview_fallback_rating(
                 application=application,
                 actor=self.hrm_chief,
-                uploaded_file=SimpleUploadedFile(
-                    "late-fallback.pdf",
-                    b"late fallback upload",
-                    content_type="application/pdf",
-                ),
-                remarks="Should be blocked after finalization.",
+                uploaded_file=SimpleUploadedFile("fallback.pdf", b"fallback", content_type="application/pdf"),
+                remarks="Late upload.",
             )
 
         interview_session.refresh_from_db()
         self.assertTrue(interview_session.is_finalized)
-
-    def test_interview_finalization_requires_rating_or_fallback(self):
-        application = self.make_application(self.cos_position)
-        self.move_application_to_hrm_chief_review(application)
-        save_interview_session(
-            application=application,
-            actor=self.hrm_chief,
-            cleaned_data=self.session_payload(),
-            finalize=False,
-        )
-
-        with self.assertRaisesMessage(
-            ValueError,
-            "Record at least one interview rating or upload a fallback rating sheet before finalizing the interview session.",
-        ):
-            save_interview_session(
-                application=application,
-                actor=self.hrm_chief,
-                cleaned_data=self.session_payload(session_notes="Attempted empty finalization."),
-                finalize=True,
-            )
-
-    def test_unauthorized_user_cannot_record_interview_rating(self):
-        application = self.make_application(self.cos_position)
-        self.move_application_to_hrm_chief_review(application)
-        save_interview_session(
-            application=application,
-            actor=self.hrm_chief,
-            cleaned_data=self.session_payload(),
-            finalize=False,
-        )
-
-        client = Client()
-        client.force_login(self.secretariat)
-        response = client.post(
-            reverse("interview-rating", kwargs={"pk": application.pk}),
-            {
-                "rating_score": "90.00",
-                "rating_notes": "Unauthorized attempt.",
-                "justification": "",
-            },
-        )
-        self.assertEqual(response.status_code, 403)
 
 
 class DeliberationDecisionSupportTests(BaseRecruitmentTestCase):
     def session_payload(self, **overrides):
         payload = {
             "scheduled_for": timezone.now() + timedelta(days=1),
-            "location": "Board Room A",
+            "location": "Virtual Deliberation Room",
             "session_notes": "Decision-support interview session prepared.",
         }
         payload.update(overrides)
@@ -1720,20 +2560,9 @@ class DeliberationDecisionSupportTests(BaseRecruitmentTestCase):
 
     def rating_payload(self, **overrides):
         payload = {
-            "rating_score": "90.00",
+            "rating_score": "92.00",
             "rating_notes": "Interview performance supports the recommendation.",
             "justification": "",
-        }
-        payload.update(overrides)
-        return payload
-
-    def deliberation_payload(self, **overrides):
-        payload = {
-            "deliberated_at": timezone.now(),
-            "deliberation_minutes": "Formal deliberation minutes were recorded.",
-            "decision_support_summary": "Consolidated outputs support the next workflow action.",
-            "ranking_position": None,
-            "ranking_notes": "Ranking notes are optional for this branch.",
         }
         payload.update(overrides)
         return payload
@@ -1745,32 +2574,22 @@ class DeliberationDecisionSupportTests(BaseRecruitmentTestCase):
         save_interview_session(
             application=application,
             actor=self.hrm_chief,
-            cleaned_data=self.session_payload(location="Virtual Deliberation Room"),
+            cleaned_data=self.session_payload(),
             finalize=False,
         )
         save_interview_rating(
             application=application,
             actor=self.hrm_chief,
-            cleaned_data=self.rating_payload(rating_score="91.50"),
+            cleaned_data=self.rating_payload(),
         )
         save_interview_session(
             application=application,
             actor=self.hrm_chief,
-            cleaned_data=self.session_payload(
-                location="Virtual Deliberation Room",
-                session_notes="Interview output locked before deliberation.",
-            ),
+            cleaned_data=self.session_payload(session_notes="Interview output locked before deliberation."),
             finalize=True,
         )
 
-        deliberation_record = save_deliberation_record(
-            application=application,
-            actor=self.hrm_chief,
-            cleaned_data=self.deliberation_payload(
-                decision_support_summary="COS decision-support packet finalized.",
-            ),
-            finalize=True,
-        )
+        deliberation_record = self.finalize_deliberation_for_current_stage(application, self.hrm_chief)
 
         self.assertTrue(deliberation_record.is_finalized)
         self.assertEqual(deliberation_record.review_stage, RecruitmentCase.Stage.HRM_CHIEF_REVIEW)
@@ -1784,25 +2603,8 @@ class DeliberationDecisionSupportTests(BaseRecruitmentTestCase):
         )
         self.assertEqual(
             deliberation_record.consolidated_snapshot["summary"]["latest_interview_average"],
-            "91.50",
+            "92.00",
         )
-        self.assertTrue(
-            AuditLog.objects.filter(
-                application=application,
-                action=AuditLog.Action.DELIBERATION_FINALIZED,
-            ).exists()
-        )
-
-    def test_cos_endorsement_requires_finalized_deliberation(self):
-        application = self.make_application(self.cos_position)
-        self.move_application_to_hrm_chief_review(application)
-        self.finalize_screening_for_current_stage(application, self.hrm_chief)
-
-        with self.assertRaisesMessage(
-            ValueError,
-            "Finalize the deliberation record before endorsing this COS application.",
-        ):
-            process_workflow_action(application, self.hrm_chief, "endorse", "Attempted without deliberation.")
 
     def test_plantilla_recommendation_requires_deliberation_and_car(self):
         application = self.make_application(self.level1_position)
@@ -1822,113 +2624,189 @@ class DeliberationDecisionSupportTests(BaseRecruitmentTestCase):
         ):
             process_workflow_action(application, self.hrmpsb, "recommend", "Attempted without CAR.")
 
-    def test_hrmpsb_can_generate_finalized_plantilla_car_with_ranked_rows(self):
-        second_applicant = User.objects.create_user(
-            username="second-applicant",
-            password="testpass123",
-            role=RecruitmentUser.Role.APPLICANT,
-        )
-        primary_application = self.make_application(self.level1_position)
-        secondary_application = self.make_application_for_user(
-            position=self.level1_position,
-            user=second_applicant,
-            first_name="Second",
-            last_name="Applicant",
-            email="second@example.com",
-        )
+        report = self.finalize_car_for_current_stage(application, self.hrmpsb)
+        self.assertEqual(ComparativeAssessmentReportItem.objects.filter(report=report).count(), 1)
 
-        for application, applicant in (
-            (primary_application, self.applicant),
-            (secondary_application, second_applicant),
-        ):
-            self.verify_application_for_submission(application)
-            submit_application(application, applicant)
-            self.finalize_screening_for_current_stage(application, self.secretariat)
-            process_workflow_action(application, self.secretariat, "endorse", "Forward to HRM Chief.")
-            self.finalize_screening_for_current_stage(application, self.hrm_chief)
-            process_workflow_action(application, self.hrm_chief, "endorse", "Forward to HRMPSB.")
+    def test_car_generation_creates_versioned_evidence(self):
+        application = self.make_application(self.level1_position)
+        self.move_application_to_hrmpsb_review(application)
+        self.finalize_deliberation_for_current_stage(application, self.hrmpsb, ranking_position=1)
 
-        self.finalize_deliberation_for_current_stage(primary_application, self.hrmpsb, ranking_position=1)
-        self.finalize_deliberation_for_current_stage(secondary_application, self.hrmpsb, ranking_position=2)
-
-        report = self.finalize_car_for_current_stage(primary_application, self.hrmpsb)
-        report.refresh_from_db()
+        report = self.finalize_car_for_current_stage(application, self.hrmpsb)
 
         self.assertTrue(report.is_finalized)
-        self.assertEqual(report.recruitment_entry, self.level1_position)
-        self.assertIsNotNone(report.evidence_item)
-        self.assertEqual(ComparativeAssessmentReport.objects.filter(application=primary_application).count(), 1)
-        self.assertEqual(ComparativeAssessmentReportItem.objects.filter(report=report).count(), 2)
-        self.assertTrue(
-            ComparativeAssessmentReportItem.objects.filter(
-                report=report,
-                application=secondary_application,
-                rank_order=2,
-            ).exists()
-        )
+        self.assertEqual(report.version_number, 1)
+        self.assertTrue(report.evidence_item.is_current_version)
+        self.assertEqual(report.evidence_item.stage, RecruitmentCase.Stage.HRMPSB_REVIEW)
+        self.assertEqual(report.evidence_item.artifact_scope, EvidenceVaultItem.OwnerScope.ENTRY)
+        self.assertEqual(report.evidence_item.artifact_type, "comparative_assessment_report")
+        self.assertIsNone(report.evidence_item.application_id)
+        self.assertIsNone(report.evidence_item.recruitment_case_id)
+        self.assertEqual(report.evidence_item.recruitment_entry_id, application.position_id)
         self.assertTrue(
             AuditLog.objects.filter(
-                application=primary_application,
+                application=application,
                 action=AuditLog.Action.CAR_FINALIZED,
             ).exists()
         )
 
-    def test_finalized_deliberation_and_car_outputs_are_locked(self):
-        application = self.make_application(self.level1_position)
-        self.move_application_to_hrmpsb_review(application)
-        self.finalize_deliberation_for_current_stage(application, self.hrmpsb, ranking_position=1)
-        report = self.finalize_car_for_current_stage(application, self.hrmpsb)
-
-        with self.assertRaisesMessage(
-            ValueError,
-            "Finalized deliberation records are locked and cannot be modified.",
-        ):
-            save_deliberation_record(
-                application=application,
-                actor=self.hrmpsb,
-                cleaned_data=self.deliberation_payload(
-                    ranking_position=1,
-                    decision_support_summary="Attempted update after lock.",
-                ),
-                finalize=False,
-            )
-
-        with self.assertRaisesMessage(
-            ValueError,
-            "Finalized Comparative Assessment Reports are locked and cannot be modified.",
-        ):
-            generate_comparative_assessment_report(
-                application=application,
-                actor=self.hrmpsb,
-                cleaned_data={"summary_notes": "Attempted CAR update after lock."},
-                finalize=False,
-            )
-
-        report.refresh_from_db()
-        self.assertTrue(report.is_finalized)
-
-    def test_unauthorized_user_cannot_record_deliberation(self):
-        application = self.make_application(self.cos_position)
-        self.move_application_to_hrm_chief_review(application)
-
-        client = Client()
-        client.force_login(self.secretariat)
-        response = client.post(
-            reverse("deliberation-record", kwargs={"pk": application.pk}),
-            {
-                "deliberated_at": timezone.now().strftime("%Y-%m-%dT%H:%M"),
-                "deliberation_minutes": "Unauthorized attempt.",
-                "decision_support_summary": "Should be blocked.",
-                "ranking_position": "",
-                "ranking_notes": "",
-                "operation": "save",
-            },
+    def test_car_generation_creates_versioned_entry_reports_across_candidates(self):
+        primary_application = self.make_application(self.level1_position)
+        secondary_applicant = User.objects.create_user(
+            username="car-secondary-applicant",
+            password="testpass123",
+            role=RecruitmentUser.Role.APPLICANT,
         )
-        self.assertEqual(response.status_code, 403)
+        secondary_application = RecruitmentApplication.objects.create(
+            applicant=secondary_applicant,
+            position=self.level1_position,
+            applicant_first_name="Second",
+            applicant_last_name="Candidate",
+            applicant_email="car.second.candidate@example.com",
+            applicant_phone="09179990001",
+            checklist_privacy_consent=True,
+            checklist_documents_complete=True,
+            checklist_information_certified=True,
+            qualification_summary="Second applicant for CAR reuse testing.",
+            cover_letter="Applying for the same entry.",
+        )
+        self.upload_required_applicant_documents(
+            secondary_application,
+            secondary_applicant,
+            content_prefix="car-secondary",
+        )
+
+        self.move_application_to_hrmpsb_review(primary_application)
+        otp_code = issue_application_otp(secondary_application, actor=secondary_applicant)
+        verify_application_otp(secondary_application, otp_code, actor=secondary_applicant)
+        submit_application(secondary_application, secondary_applicant)
+        self.finalize_screening_for_current_stage(secondary_application, self.secretariat)
+        process_workflow_action(
+            secondary_application,
+            self.secretariat,
+            "endorse",
+            "Forward second candidate to HRM Chief.",
+        )
+        secondary_application.refresh_from_db()
+        self.finalize_screening_for_current_stage(secondary_application, self.hrm_chief)
+        process_workflow_action(
+            secondary_application,
+            self.hrm_chief,
+            "endorse",
+            "Forward second candidate to HRMPSB.",
+        )
+        secondary_application.refresh_from_db()
+
+        self.finalize_deliberation_for_current_stage(primary_application, self.hrmpsb, ranking_position=1)
+        self.finalize_deliberation_for_current_stage(secondary_application, self.hrmpsb, ranking_position=2)
+
+        draft_report = generate_comparative_assessment_report(
+            application=primary_application,
+            actor=self.hrmpsb,
+            cleaned_data={"summary_notes": "Draft entry-level CAR."},
+            finalize=False,
+        )
+        finalized_report = generate_comparative_assessment_report(
+            application=secondary_application,
+            actor=self.hrmpsb,
+            cleaned_data={"summary_notes": "Final entry-level CAR."},
+            finalize=True,
+        )
+
+        self.assertNotEqual(draft_report.pk, finalized_report.pk)
+        self.assertEqual(
+            ComparativeAssessmentReport.objects.filter(
+                recruitment_entry=self.level1_position,
+                review_stage=RecruitmentCase.Stage.HRMPSB_REVIEW,
+            ).count(),
+            2,
+        )
+        self.assertEqual(draft_report.version_number, 1)
+        self.assertEqual(finalized_report.version_number, 2)
+        self.assertFalse(draft_report.is_finalized)
+        self.assertTrue(finalized_report.is_finalized)
+        self.assertEqual(
+            ComparativeAssessmentReportItem.objects.filter(report=finalized_report).count(),
+            2,
+        )
+
+    def test_finalized_car_is_reused_for_other_candidates_in_same_entry(self):
+        primary_application = self.make_application(self.level1_position)
+        secondary_applicant = User.objects.create_user(
+            username="secondary-applicant",
+            password="testpass123",
+            role=RecruitmentUser.Role.APPLICANT,
+        )
+        secondary_application = RecruitmentApplication.objects.create(
+            applicant=secondary_applicant,
+            position=self.level1_position,
+            applicant_first_name="Second",
+            applicant_last_name="Candidate",
+            applicant_email="second.candidate@example.com",
+            applicant_phone="09179990000",
+            checklist_privacy_consent=True,
+            checklist_documents_complete=True,
+            checklist_information_certified=True,
+            qualification_summary="Second applicant for the same Plantilla entry.",
+            cover_letter="Applying for the same entry.",
+        )
+        self.upload_required_applicant_documents(
+            secondary_application,
+            secondary_applicant,
+            content_prefix="secondary",
+        )
+
+        self.move_application_to_hrmpsb_review(primary_application)
+        otp_code = issue_application_otp(secondary_application, actor=secondary_applicant)
+        verify_application_otp(secondary_application, otp_code, actor=secondary_applicant)
+        submit_application(secondary_application, secondary_applicant)
+        self.finalize_screening_for_current_stage(secondary_application, self.secretariat)
+        process_workflow_action(
+            secondary_application,
+            self.secretariat,
+            "endorse",
+            "Forward second candidate to HRM Chief.",
+        )
+        secondary_application.refresh_from_db()
+        self.finalize_screening_for_current_stage(secondary_application, self.hrm_chief)
+        process_workflow_action(
+            secondary_application,
+            self.hrm_chief,
+            "endorse",
+            "Forward second candidate to HRMPSB.",
+        )
+        secondary_application.refresh_from_db()
+
+        self.finalize_deliberation_for_current_stage(primary_application, self.hrmpsb, ranking_position=1)
+        self.finalize_deliberation_for_current_stage(secondary_application, self.hrmpsb, ranking_position=2)
+        shared_report = self.finalize_car_for_current_stage(primary_application, self.hrmpsb)
+
+        secondary_packet = build_submission_packet(secondary_application)
+        self.assertTrue(secondary_packet["summary"]["has_comparative_assessment_report"])
+        self.assertEqual(
+            ComparativeAssessmentReportItem.objects.filter(report=shared_report).count(),
+            2,
+        )
+
+        process_workflow_action(
+            secondary_application,
+            self.hrmpsb,
+            "recommend",
+            "Shared CAR covers all ranked candidates in the entry.",
+        )
+        secondary_application.refresh_from_db()
+        self.assertEqual(
+            secondary_application.status,
+            RecruitmentApplication.Status.APPOINTING_AUTHORITY_REVIEW,
+        )
+        self.assertEqual(
+            secondary_application.case.current_stage,
+            RecruitmentCase.Stage.APPOINTING_AUTHORITY_REVIEW,
+        )
 
 
-class DecisionApprovalHandlingTests(BaseRecruitmentTestCase):
-    def test_appointing_authority_can_record_selected_final_decision_with_preserved_packet(self):
+class FinalDecisionHandlingTests(BaseRecruitmentTestCase):
+    def test_selected_final_decision_routes_case_to_completion_and_preserves_packet(self):
         application = self.make_application(self.level1_position)
         self.move_application_to_appointing_review(application)
 
@@ -1939,174 +2817,57 @@ class DecisionApprovalHandlingTests(BaseRecruitmentTestCase):
             decision_notes="Selected after reviewing the final submission packet.",
         )
         application.refresh_from_db()
+        application.case.refresh_from_db()
 
-        self.assertEqual(decision.decision_outcome, FinalDecision.Outcome.SELECTED)
         self.assertEqual(application.status, RecruitmentApplication.Status.APPROVED)
-        self.assertEqual(application.case.current_stage, RecruitmentCase.Stage.CLOSED)
-        self.assertTrue(application.case.is_stage_locked)
-        self.assertTrue(decision.submission_packet_snapshot["summary"]["ready_for_final_decision"])
+        self.assertEqual(application.case.current_stage, RecruitmentCase.Stage.COMPLETION)
+        self.assertEqual(decision.decision_outcome, FinalDecision.Outcome.SELECTED)
+        self.assertTrue(decision.submission_packet_snapshot["summary"]["has_deliberation_record"])
+        self.assertTrue(decision.submission_packet_snapshot["summary"]["has_comparative_assessment_report"])
         self.assertTrue(
-            decision.submission_packet_snapshot["summary"]["has_comparative_assessment_report"]
+            NotificationLog.objects.filter(
+                application=application,
+                notification_type=NotificationLog.NotificationType.SELECTED_APPLICANT,
+            ).exists()
         )
-        self.assertGreaterEqual(
-            decision.submission_packet_snapshot["summary"]["evidence_reference_count"],
-            1,
-        )
-        audit_entry = AuditLog.objects.filter(
-            application=application,
-            action=AuditLog.Action.DECISION_RECORDED,
-        ).first()
-        self.assertIsNotNone(audit_entry)
-        self.assertEqual(audit_entry.metadata["final_decision_id"], decision.id)
 
-    def test_appointing_authority_can_record_not_selected_decision_history_after_reopen(self):
+    def test_not_selected_final_decision_closes_case_and_locks_it(self):
         application = self.make_application(self.cos_position)
         self.move_application_to_appointing_review(application)
 
-        first_decision = self.record_final_decision_for_current_stage(
+        decision = self.record_final_decision_for_current_stage(
             application,
             self.appointing,
             decision_outcome=FinalDecision.Outcome.NOT_SELECTED,
-            decision_notes="Not selected after initial review.",
-        )
-        reopen_recruitment_case(
-            application=application,
-            actor=self.hrm_chief,
-            reason="Rechecking the appointing-authority packet.",
+            decision_notes="Not selected after reviewing final records.",
         )
         application.refresh_from_db()
+        application.case.refresh_from_db()
 
-        self.assertEqual(application.case.current_stage, RecruitmentCase.Stage.APPOINTING_AUTHORITY_REVIEW)
-        self.assertFalse(application.case.is_stage_locked)
-
-        second_decision = self.record_final_decision_for_current_stage(
-            application,
-            self.appointing,
-            decision_outcome=FinalDecision.Outcome.SELECTED,
-            decision_notes="Selected after controlled reopen review.",
+        self.assertEqual(decision.decision_outcome, FinalDecision.Outcome.NOT_SELECTED)
+        self.assertEqual(application.status, RecruitmentApplication.Status.REJECTED)
+        self.assertEqual(application.case.current_stage, RecruitmentCase.Stage.CLOSED)
+        self.assertTrue(application.case.is_stage_locked)
+        self.assertTrue(
+            NotificationLog.objects.filter(
+                application=application,
+                notification_type=NotificationLog.NotificationType.NON_SELECTED_APPLICANT,
+            ).exists()
         )
-        application.refresh_from_db()
 
-        history = list(application.final_decisions.order_by("created_at"))
-        self.assertEqual(len(history), 2)
-        self.assertEqual(history[0].id, first_decision.id)
-        self.assertEqual(history[1].id, second_decision.id)
-        self.assertEqual(application.status, RecruitmentApplication.Status.APPROVED)
-
-    def test_submission_packet_view_and_final_decision_history_are_visible_on_case_page(self):
+    def test_application_detail_exposes_decision_packet_sections(self):
         application = self.make_application(self.level1_position)
         self.move_application_to_appointing_review(application)
-        self.record_final_decision_for_current_stage(
-            application,
-            self.appointing,
-            decision_outcome=FinalDecision.Outcome.SELECTED,
-            decision_notes="Selected after panel review.",
-        )
 
         client = Client()
         client.force_login(self.appointing)
         response = client.get(reverse("application-detail", kwargs={"pk": application.pk}))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Submission Packet")
-        self.assertContains(response, "Decision History")
-        self.assertContains(response, "Selected")
-        self.assertContains(response, "The pre-decision packet snapshot remains preserved as read-only.")
-
-    def test_only_appointing_authority_can_submit_final_decision(self):
-        application = self.make_application(self.cos_position)
-        self.move_application_to_appointing_review(application)
-
-        client = Client()
-        client.force_login(self.hrm_chief)
-        response = client.post(
-            reverse("final-decision-record", kwargs={"pk": application.pk}),
-            {
-                "decision_outcome": FinalDecision.Outcome.NOT_SELECTED,
-                "decision_notes": "Unauthorized attempt.",
-            },
-        )
-
-        self.assertEqual(response.status_code, 403)
-
-    def test_submission_packet_builder_marks_required_components_ready(self):
-        application = self.make_application(self.cos_position)
-        self.move_application_to_appointing_review(application)
+        self.assertContains(response, "Interview Scheduling")
+        self.assertContains(response, "Deliberation Record")
+        self.assertContains(response, "Workflow Snapshot")
+        self.assertContains(response, "Final Decision Recording")
 
         packet = build_submission_packet(application)
-
-        self.assertTrue(packet["summary"]["ready_for_final_decision"])
         self.assertTrue(packet["summary"]["has_deliberation_record"])
-        self.assertFalse(packet["summary"]["missing_components"])
-        self.assertGreaterEqual(packet["summary"]["evidence_reference_count"], 1)
-
-
-class EvidenceVaultTests(BaseRecruitmentTestCase):
-    def test_evidence_is_encrypted_and_digest_is_stored(self):
-        application = RecruitmentApplication.objects.create(
-            applicant=self.applicant,
-            position=self.level1_position,
-            qualification_summary="Qualified applicant.",
-        )
-        upload_evidence_item(
-            application=application,
-            actor=self.applicant,
-            label="Personal Data Sheet (CS Form No. 212, Revised 2025) with recent passport-sized picture",
-            uploaded_file=SimpleUploadedFile(
-                "resume.txt",
-                b"plain-text resume",
-                content_type="text/plain",
-            ),
-            document_type="personal_data_sheet",
-        )
-
-        evidence = EvidenceVaultItem.objects.get(application=application)
-        self.assertNotEqual(bytes(evidence.ciphertext), b"plain-text resume")
-        self.assertEqual(len(evidence.sha256_digest), 64)
-        self.assertEqual(evidence.document_type, "personal_data_sheet")
-
-
-class ViewAndExportTests(BaseRecruitmentTestCase):
-    def test_applicant_user_cannot_access_internal_dashboard(self):
-        client = Client()
-        client.force_login(self.applicant)
-        response = client.get(reverse("dashboard"))
-        self.assertEqual(response.status_code, 403)
-
-    def test_applicant_user_cannot_access_internal_application_detail(self):
-        other_applicant = User.objects.create_user(
-            username="otherapplicant",
-            password="testpass123",
-            role=RecruitmentUser.Role.APPLICANT,
-        )
-        application = RecruitmentApplication.objects.create(
-            applicant=other_applicant,
-            position=self.level1_position,
-            qualification_summary="Another applicant.",
-        )
-
-        client = Client()
-        client.force_login(self.applicant)
-        response = client.get(reverse("application-detail", kwargs={"pk": application.pk}))
-        self.assertEqual(response.status_code, 403)
-
-    def test_export_bundle_returns_zip_with_pdf_and_manifests(self):
-        application = self.make_application(self.level2_position)
-        self.verify_application_for_submission(application)
-        submit_application(application, self.applicant)
-
-        client = Client()
-        client.force_login(self.hrm_chief)
-        response = client.get(reverse("application-export", kwargs={"pk": application.pk}))
-        self.assertEqual(response.status_code, 200)
-        archive = zipfile.ZipFile(io.BytesIO(response.content))
-        names = set(archive.namelist())
-        self.assertIn(f"{application.reference_number}.pdf", names)
-        self.assertIn("manifest.json", names)
-        self.assertIn("audit_log.csv", names)
-        self.assertTrue(
-            AuditLog.objects.filter(
-                application=application,
-                action=AuditLog.Action.EXPORT_GENERATED,
-            ).exists()
-        )

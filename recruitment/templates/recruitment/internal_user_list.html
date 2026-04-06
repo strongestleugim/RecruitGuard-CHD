@@ -1,15 +1,14 @@
 {% extends "internal_base.html" %}
 {% load recruitment_ui %}
 
-{% block internal_content %}
+{% block content %}
 <div class="rg-page-header">
     <div>
         <p class="rg-eyebrow">Identity and Access</p>
         <h1 class="rg-page-title">Internal Users</h1>
-        <p class="rg-page-copy">Administrative control of internal staff accounts within the locked actor set and the internal-only portal boundary.</p>
+        <p class="rg-page-copy">Account administration for the locked internal actor set.</p>
     </div>
     <div class="rg-page-actions">
-        <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary">Dashboard</a>
         <a href="{% url 'internal-user-create' %}" class="btn btn-rg-primary">Create Internal User</a>
     </div>
 </div>
@@ -35,11 +34,6 @@
         <strong class="rg-kpi__value">Admin</strong>
         <span class="rg-kpi__hint">Identity and access control only</span>
     </div>
-</div>
-
-<div class="rg-admin-note mb-4">
-    <strong>Access-control safeguard</strong>
-    <p>This page standardizes the internal administrative workspace without widening permissions. Recruitment case content remains separate from account administration unless explicitly allowed by the current system rules.</p>
 </div>
 
 <div class="rg-table-shell">

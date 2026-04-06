@@ -1,14 +1,28 @@
-{% extends "internal_base.html" %}
-{% load static %}
+{% extends "base.html" %}
 
-{% block internal_content %}
+{% block title %}Internal Login | RecruitGuard-CHD{% endblock %}
+{% block body_class %}internal-portal-body{% endblock %}
+
+{% block theme_styles %}
+:root {
+    --rg-primary: #005a87;
+    --rg-primary-strong: #004d72;
+    --rg-surface: #f5f6f7;
+}
+{% endblock %}
+
+{% block body_background %}
+background: #f5f6f7;
+{% endblock %}
+
+{% block content %}
 <div class="rg-auth-shell">
     <div class="rg-auth-grid">
         <div class="card rg-auth-panel">
             <div class="mb-4">
                 <p class="rg-eyebrow">Internal Access</p>
-                <h1 class="rg-page-title mb-2">RecruitGuard-CHD Internal Login</h1>
-                <p class="rg-page-copy">Use your assigned internal account to access the staff-only workspace for workflow routing, case review, records control, and role-based recruitment administration.</p>
+                <h1 class="rg-page-title mb-2" style="font-size:1.75rem;">RecruitGuard-CHD</h1>
+                <p class="rg-page-copy">Use your assigned internal account to access protected recruitment functions, workflow routing, evidence handling, and staff-facing records.</p>
             </div>
             <form method="post">
                 {% csrf_token %}
@@ -24,19 +38,16 @@
                 </div>
             </form>
             <div class="rg-form-actions mt-3">
-                <a href="{% url 'applicant-portal' %}" class="btn btn-outline-secondary">Open Applicant Portal</a>
-                <a href="{% url 'applicant-status-lookup' %}" class="btn btn-outline-secondary">Check Submission Status</a>
+                <a href="{% url 'applicant-portal' %}" class="btn btn-outline-secondary">Applicant Portal</a>
+                <a href="{% url 'applicant-status-lookup' %}" class="btn btn-outline-secondary">Track Application</a>
             </div>
         </div>
 
         <aside class="rg-surface rg-auth-side">
-            <div class="rg-auth-media">
-                <img src="{% static 'img/doh-chd-banner.jpg' %}" alt="DOH-CHD CALABARZON banner">
-            </div>
             <div>
                 <p class="rg-eyebrow">Portal Boundary</p>
-                <h2 class="h2 mb-3">Institutional staff workspace for the shared recruitment engine.</h2>
-                <p class="rg-note">Internal access remains separate from the public applicant portal while still using the same backend, one database, and one workflow engine for Plantilla and COS recruitment.</p>
+                <h2 class="h2 mb-3">Staff-facing workspace for the shared recruitment engine.</h2>
+                <p class="rg-note">Internal access remains separate from the public applicant portal, while using the same backend, database, and workflow engine.</p>
             </div>
             <div class="rg-step-list">
                 <div class="rg-auth-side__panel">
@@ -50,10 +61,6 @@
                 <div class="rg-auth-side__panel">
                     <strong>Applicant functions stay public-facing</strong>
                     <p class="mb-0 rg-note">Public submission, OTP verification, receipt, and status lookup remain under the separate applicant portal.</p>
-                </div>
-                <div class="rg-auth-side__panel">
-                    <strong>Operational module surface</strong>
-                    <p class="mb-0 rg-note">The internal workspace supports dashboard, case handling, workflow routing, evaluation records, evidence controls, audit visibility, export, and system administration under one institutional layout.</p>
                 </div>
             </div>
         </aside>

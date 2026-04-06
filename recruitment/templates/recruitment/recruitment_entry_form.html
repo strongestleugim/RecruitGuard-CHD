@@ -1,20 +1,15 @@
 {% extends "internal_base.html" %}
 
-{% block internal_content %}
+{% block content %}
 <div class="rg-page-header">
     <div>
         <p class="rg-eyebrow">Recruitment Entry Management</p>
         <h1 class="rg-page-title">{% if object %}Update Recruitment Entry{% else %}Create Recruitment Entry{% endif %}</h1>
-        <p class="rg-page-copy">Configure the recruitment entry metadata that drives public intake visibility, branch distinction, and level-aware routing inside the unified internal recruitment administration portal.</p>
+        <p class="rg-page-copy">Configure the recruitment entry metadata that drives public intake visibility, branch distinction, and level-aware routing.</p>
     </div>
     <div class="rg-page-actions">
         <a href="{% url 'recruitment-entry-list' %}" class="btn btn-outline-secondary">Back to Entries</a>
     </div>
-</div>
-
-<div class="rg-admin-note mb-4">
-    <strong>Internal entry setup</strong>
-    <p>Entry configuration remains an internal-only function. Public applicant pages continue to consume these records without exposing internal management controls.</p>
 </div>
 
 <div class="row justify-content-center">

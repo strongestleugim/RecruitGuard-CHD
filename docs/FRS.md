@@ -191,8 +191,9 @@ iii. System shall load the corresponding intake flow after the applicant selects
 ### b. Accountless Application Submission
 i. System shall support accountless submission of applications.  
 ii. Applicant shall be able to encode required submission information based on the selected recruitment path.  
-iii. System shall require completion of a submission checklist before final submission.  
-iv. Submission data shall be bound to the selected recruitment entry.  
+iii. Applicant supporting documents shall be uploaded and validated using explicit document requirement codes for the active recruitment path.
+iv. System shall require completion of a submission checklist before final submission.
+v. Submission data shall be bound to the selected recruitment entry.
 
 ### c. OTP Verification
 i. System shall send an OTP to the applicant’s registered email prior to final submission.  

@@ -2,76 +2,130 @@
 {% load recruitment_ui %}
 
 {% block content %}
-<div class="rg-page-header">
-    <div>
-        <p class="rg-eyebrow">Submission Receipt</p>
-        <h1 class="rg-page-title">{{ application.reference_number }}</h1>
-        <p class="rg-page-copy">Your application has been finalized and routed into the recruitment workflow. Keep this reference number for later status lookup.</p>
-    </div>
-    <div class="rg-header-stats">
-        <div class="rg-stat-chip">
-            <strong>{{ application.get_branch_display }}</strong>
-            <span>Recruitment Branch</span>
-        </div>
-        <div class="rg-stat-chip">
-            <strong>{{ application.get_status_display }}</strong>
-            <span>Recorded Status</span>
+<div class="rg-container" style="max-width:900px;">
+    <div class="card p-4 mb-4">
+        <div class="rg-receipt-success">
+            <div class="rg-receipt-success__icon">✓</div>
+            <div>
+                <h2>Application Submitted</h2>
+                <p><strong>Application ID:</strong> {{ application.reference_label }}</p>
+                <p>{{ application.position.title }} — {{ application.get_branch_display }}</p>
+                <p>Submitted on {{ application.submitted_at|date:"F d, Y H:i" }}</p>
+            </div>
         </div>
     </div>
-</div>
 
-<div class="rg-receipt-grid">
-    <div class="rg-receipt-main">
-        <div class="card p-4">
-            <div class="alert alert-success">Your application has been finalized and routed into the recruitment workflow.</div>
-            <div class="rg-info-list">
-                <div class="rg-info-row">
-                    <div class="rg-info-row__label">Applicant</div>
-                    <div class="rg-info-row__value">{{ application.applicant_display_name }}</div>
-                </div>
-                <div class="rg-info-row">
-                    <div class="rg-info-row__label">Email</div>
-                    <div class="rg-info-row__value">{{ application.applicant_email }}</div>
-                </div>
-                <div class="rg-info-row">
-                    <div class="rg-info-row__label">Position</div>
-                    <div class="rg-info-row__value">{{ application.position.title }} ({{ application.position.job_code }})</div>
-                </div>
-                <div class="rg-info-row">
-                    <div class="rg-info-row__label">Branch</div>
-                    <div class="rg-info-row__value"><span class="rg-pill rg-pill--{{ application.branch|branch_theme }}">{{ application.get_branch_display }}</span></div>
-                </div>
-                <div class="rg-info-row">
-                    <div class="rg-info-row__label">Routing Basis</div>
-                    <div class="rg-info-row__value"><span class="rg-pill rg-pill--{{ application.level|level_theme }}">{{ application.get_level_display }}</span></div>
-                </div>
-                <div class="rg-info-row">
-                    <div class="rg-info-row__label">Submitted At</div>
-                    <div class="rg-info-row__value">{{ application.submitted_at|date:"M d, Y H:i" }}</div>
+    <div class="row g-4">
+        <div class="col-lg-8">
+            <div class="card p-4 mb-4">
+                <h2 class="h5 mb-1">Submission Receipt</h2>
+                <p class="rg-note mb-3">Keep this information for your records.</p>
+                <div class="rg-info-list">
+                    <div class="rg-info-row">
+                        <div class="rg-info-row__label">Application ID</div>
+                        <div class="rg-info-row__value"><code>{{ application.reference_label }}</code></div>
+                    </div>
+                    <div class="rg-info-row">
+                        <div class="rg-info-row__label">Applicant Email</div>
+                        <div class="rg-info-row__value">{{ application.applicant_email }}</div>
+                    </div>
+                    <div class="rg-info-row">
+                        <div class="rg-info-row__label">Vacancy</div>
+                        <div class="rg-info-row__value">{{ application.position.title }}</div>
+                    </div>
+                    <div class="rg-info-row">
+                        <div class="rg-info-row__label">Branch</div>
+                        <div class="rg-info-row__value"><span class="rg-pill rg-pill--{{ application.branch|branch_theme }}">{{ application.get_branch_display }}</span></div>
+                    </div>
+                    <div class="rg-info-row">
+                        <div class="rg-info-row__label">Level</div>
+                        <div class="rg-info-row__value"><span class="rg-pill rg-pill--{{ application.level|level_theme }}">{{ application.get_level_display }}</span></div>
+                    </div>
                 </div>
             </div>
-            <div class="rg-form-actions">
-                <a href="{% url 'applicant-status-lookup' %}" class="btn btn-rg-primary">Check Status</a>
-                <a href="{% url 'applicant-portal' %}" class="btn btn-outline-secondary">Back to Portal</a>
+
+            <div class="card p-4 mb-4">
+                <h2 class="h5 mb-1">Document Inventory</h2>
+                <p class="rg-note mb-3">Files stored in the Evidence Vault for this application.</p>
+                {% if evidence_items %}
+                    <div class="rg-table-shell">
+                        <table class="table rg-doc-inventory">
+                            <thead>
+                                <tr>
+                                    <th>Document Name</th>
+                                    <th>File Name</th>
+                                    <th>Uploaded At</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for item in evidence_items %}
+                                    <tr>
+                                        <td>{{ item.label }}</td>
+                                        <td>{{ item.original_filename }}</td>
+                                        <td>{{ item.uploaded_at|date:"M d, Y H:i" }}</td>
+                                        <td><span class="rg-verified-badge">✓ Stored</span></td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <div class="rg-empty-state">No documents uploaded.</div>
+                {% endif %}
+            </div>
+
+            <div class="card p-4">
+                <h2 class="h5 mb-1">Integrity Receipt</h2>
+                <p class="rg-note mb-3">Evidence integrity and traceability.</p>
+                <div class="rg-info-list">
+                    <div class="rg-info-row">
+                        <div class="rg-info-row__label">Document Hashing</div>
+                        <div class="rg-info-row__value"><span class="rg-pill rg-pill--success">Enabled (SHA-256)</span></div>
+                    </div>
+                    <div class="rg-info-row">
+                        <div class="rg-info-row__label">Evidence Vault</div>
+                        <div class="rg-info-row__value">AES-256-GCM encrypted at rest</div>
+                    </div>
+                </div>
             </div>
         </div>
-    </div>
-    <div class="rg-receipt-side">
-        <div class="card p-4">
-            <p class="rg-eyebrow">Next Step</p>
-            <div class="rg-step-list">
-                <div class="rg-step">
-                    <strong>Save the Application ID</strong>
-                    <p>{{ application.reference_number }} is the identifier used for public status lookup.</p>
+
+        <div class="col-lg-4">
+            <div class="card p-4 mb-4">
+                <p class="rg-eyebrow">Track Application</p>
+                <p class="rg-note mb-3" style="font-size:.75rem;">Use your Application ID and email to check your status.</p>
+                <form method="get" action="{% url 'applicant-status-lookup' %}">
+                    <div class="mb-2">
+                        <input type="text" name="reference" class="form-control" placeholder="Application ID" value="{{ application.reference_label }}">
+                    </div>
+                    <div class="mb-2">
+                        <input type="email" name="email" class="form-control" placeholder="Email Address" value="{{ application.applicant_email }}">
+                    </div>
+                    <button type="submit" class="btn btn-rg-primary w-100">Check Status</button>
+                </form>
+            </div>
+
+            <div class="card p-4 mb-4">
+                <p class="rg-eyebrow">Status Flow</p>
+                <div class="rg-step-list">
+                    <div class="rg-step" style="background:#e9f9f0;border-color:#c8ebd6;">
+                        <strong style="color:#16a34a;">✓ Submitted</strong>
+                        <p>Your application is received.</p>
+                    </div>
+                    <div class="rg-step">
+                        <strong>Under Intake Review</strong>
+                        <p>Documents are being validated.</p>
+                    </div>
+                    <div class="rg-step">
+                        <strong>Screening Pending</strong>
+                        <p>Qualification screening begins soon.</p>
+                    </div>
                 </div>
-                <div class="rg-step">
-                    <strong>Use the same email address</strong>
-                    <p>Status lookup requires the submitted Application ID and the same applicant email address.</p>
-                </div>
-                <div class="rg-step">
-                    <strong>Wait for internal handling</strong>
-                    <p>The case now proceeds under the shared internal workflow according to the recorded branch and level.</p>
-                </div>
+            </div>
+
+            <div class="rg-form-actions">
+                <a href="{% url 'applicant-portal' %}" class="btn btn-outline-secondary w-100">Return to Vacancies</a>
             </div>
         </div>
     </div>

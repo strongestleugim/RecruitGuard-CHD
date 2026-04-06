@@ -74,6 +74,7 @@ RecruitGuard-CHD is a secure-by-design web-based recruitment management system f
 ## Before Editing
 Read these first if they exist:
 - AGENTS.md
+- README.md
 - docs/FRS.md
 - docs/modules.md
 - docs/workflow-rules.md
@@ -82,7 +83,7 @@ Read these first if they exist:
 - docs/use-cases.md
 - docs/ERD.md
 - docs/ERD-FULL.md
-- docs/testing-kpis.md
+- docs/development-checklist.md
 
 ## Definition of Done
 For each implementation task:

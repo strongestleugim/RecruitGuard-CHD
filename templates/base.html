@@ -32,6 +32,7 @@
     </style>
 </head>
 <body class="{% block body_class %}{% endblock %}">
+    {% block layout_wrapper %}
     {% block site_header %}{% endblock %}
     {% if messages %}
         <div class="rg-message-stack">
@@ -43,5 +44,6 @@
     <main class="site-shell {% block main_class %}rg-container py-4{% endblock %}">
         {% block content %}{% endblock %}
     </main>
+    {% endblock %}
 </body>
 </html>

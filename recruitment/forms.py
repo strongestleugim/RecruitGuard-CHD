@@ -1,11 +1,17 @@
 from django import forms
 from django.conf import settings
 from django.contrib.auth.forms import AuthenticationForm, PasswordChangeForm, UserCreationForm
+from django.forms import BaseInlineFormSet, inlineformset_factory
+from django.utils import timezone
 
 from .models import (
+    AuditLog,
     ComparativeAssessmentReport,
+    CompletionRecord,
+    CompletionRequirement,
     DeliberationRecord,
     ExamRecord,
+    EvidenceVaultItem,
     FinalDecision,
     InterviewRating,
     InterviewSession,
@@ -15,7 +21,7 @@ from .models import (
     RecruitmentUser,
     ScreeningRecord,
 )
-from .requirements import PERFORMANCE_RATING, get_applicant_document_requirements
+from .requirements import get_applicant_document_requirements
 from .services import get_available_actions
 
 
@@ -29,6 +35,24 @@ class BootstrapFormMixin:
                 field.widget.attrs["class"] = f"{css_class} form-select".strip()
             else:
                 field.widget.attrs["class"] = f"{css_class} form-control".strip()
+
+
+class MultipleFileInput(forms.ClearableFileInput):
+    allow_multiple_selected = True
+
+
+class MultipleFileField(forms.FileField):
+    widget = MultipleFileInput
+
+    def clean(self, data, initial=None):
+        cleaned_files = []
+        file_list = data if isinstance(data, (list, tuple)) else [data]
+        for item in file_list:
+            if item:
+                cleaned_files.append(super().clean(item, initial))
+        if self.required and not cleaned_files:
+            raise forms.ValidationError("At least one file is required.")
+        return cleaned_files
 
 
 def internal_role_choices():
@@ -105,50 +129,6 @@ class InternalUserUpdateForm(BootstrapFormMixin, forms.ModelForm):
         self._apply_bootstrap()
 
 
-class ApplicationForm(BootstrapFormMixin, forms.ModelForm):
-    class Meta:
-        model = RecruitmentApplication
-        fields = ["position", "qualification_summary", "cover_letter"]
-        widgets = {
-            "qualification_summary": forms.Textarea(attrs={"rows": 5}),
-            "cover_letter": forms.Textarea(attrs={"rows": 5}),
-        }
-
-    def __init__(self, *args, user=None, **kwargs):
-        super().__init__(*args, **kwargs)
-        queryset = PositionPosting.objects.filter(
-            status=PositionPosting.EntryStatus.ACTIVE,
-        ).select_related("position_reference")
-        if self.instance.pk:
-            queryset = queryset | PositionPosting.objects.filter(pk=self.instance.position_id)
-        self.fields["position"].queryset = queryset.distinct().order_by("title")
-        self.fields["position"].label = "Recruitment Entry"
-        self.fields["position"].help_text = "Select an active Plantilla or COS recruitment entry."
-        self._apply_bootstrap()
-        self.user = user
-
-    def clean_position(self):
-        position = self.cleaned_data["position"]
-        existing_position = getattr(self.instance, "position", None)
-        if not self.user:
-            return position
-        duplicate_qs = RecruitmentApplication.objects.filter(
-            applicant=self.user,
-            position=position,
-        )
-        if self.instance.pk:
-            duplicate_qs = duplicate_qs.exclude(pk=self.instance.pk)
-        if duplicate_qs.exists():
-            raise forms.ValidationError(
-                "You already have an application record for this recruitment entry."
-            )
-        if not position.is_open_for_intake and position != existing_position:
-            raise forms.ValidationError(
-                "The selected recruitment entry is not currently open for intake."
-            )
-        return position
-
-
 class ApplicantPortalIntakeForm(BootstrapFormMixin, forms.Form):
     first_name = forms.CharField(max_length=150)
     last_name = forms.CharField(max_length=150)
@@ -158,10 +138,6 @@ class ApplicantPortalIntakeForm(BootstrapFormMixin, forms.Form):
     cover_letter = forms.CharField(
         required=False,
         widget=forms.Textarea(attrs={"rows": 4}),
-    )
-    performance_rating_not_applicable = forms.BooleanField(
-        required=False,
-        label="I do not have a prior performance rating applicable to this application.",
     )
     checklist_privacy_consent = forms.BooleanField(
         label="I consent to the use of my submitted information for recruitment processing.",
@@ -174,63 +150,63 @@ class ApplicantPortalIntakeForm(BootstrapFormMixin, forms.Form):
     def __init__(self, *args, entry=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.entry = entry
+        self.existing_draft = None
         self.document_requirements = get_applicant_document_requirements()
+        self.document_upload_field_names = []
         for requirement in self.document_requirements:
+            help_text = requirement.help_text
+            if not requirement.is_required:
+                help_text = f"{help_text} Optional when not applicable."
+            help_text = f"{help_text} Combine multiple pages or certificates into one file when needed."
             self.fields[requirement.file_field_name] = forms.FileField(
-                required=requirement.is_required,
+                required=False,
                 label=requirement.title,
-                help_text=requirement.help_text,
+                help_text=help_text,
             )
+            self.document_upload_field_names.append(requirement.file_field_name)
         branch_label = (
             entry.get_branch_display() if entry else "selected"
         )
         self.fields["checklist_documents_complete"].label = (
-            f"I uploaded every required document in its designated field for the {branch_label} application path."
+            f"I completed the document checklist for the {branch_label} application path."
         )
         self._apply_bootstrap()
+        self.document_upload_fields = [
+            self[field_name] for field_name in self.document_upload_field_names
+        ]
 
     def clean_email(self):
         return self.cleaned_data["email"].strip().lower()
 
-    def get_uploaded_documents(self):
+    def get_requirement_uploads(self):
         return {
-            requirement.code: self.cleaned_data[requirement.file_field_name]
+            requirement.code: self.cleaned_data.get(requirement.file_field_name)
             for requirement in self.document_requirements
             if self.cleaned_data.get(requirement.file_field_name)
         }
 
     def clean(self):
         cleaned_data = super().clean()
-        performance_rating_not_applicable = cleaned_data.get("performance_rating_not_applicable")
-        performance_rating_file = cleaned_data.get(PERFORMANCE_RATING)
-
-        if performance_rating_not_applicable and performance_rating_file:
-            self.add_error(
-                PERFORMANCE_RATING,
-                "Remove the uploaded performance rating or clear the not-applicable checkbox.",
-            )
-        if not performance_rating_not_applicable and not performance_rating_file:
-            self.add_error(
-                PERFORMANCE_RATING,
-                "Upload the performance rating or mark this requirement as not applicable.",
-            )
-
-        for requirement in self.document_requirements:
-            uploaded_file = cleaned_data.get(requirement.file_field_name)
-            if uploaded_file and uploaded_file.size > settings.MAX_EVIDENCE_UPLOAD_BYTES:
-                self.add_error(
-                    requirement.file_field_name,
-                    "Uploaded file exceeds the configured Evidence Vault size limit.",
-                )
-
         if self.entry and not self.entry.is_open_for_intake:
             raise forms.ValidationError(
                 "The selected recruitment entry is not currently open for intake."
             )
-        if self.entry and cleaned_data.get("email"):
+        applicant_email = cleaned_data.get("email")
+        if self.entry and applicant_email:
+            self.existing_draft = (
+                RecruitmentApplication.objects.filter(
+                    position=self.entry,
+                    applicant_email__iexact=applicant_email,
+                    submitted_at__isnull=True,
+                    status=RecruitmentApplication.Status.DRAFT,
+                )
+                .prefetch_related("evidence_items")
+                .order_by("-updated_at", "-created_at")
+                .first()
+            )
             duplicate_exists = RecruitmentApplication.objects.filter(
                 position=self.entry,
-                applicant_email__iexact=cleaned_data["email"],
+                applicant_email__iexact=applicant_email,
                 submitted_at__isnull=False,
             ).exists()
             if duplicate_exists:
@@ -238,6 +214,34 @@ class ApplicantPortalIntakeForm(BootstrapFormMixin, forms.Form):
                     "email",
                     "An application for this recruitment entry has already been submitted using this email address.",
                 )
+            existing_document_codes = set()
+            if self.existing_draft:
+                existing_document_codes = set(
+                    self.existing_draft.evidence_items.filter(
+                        artifact_scope=EvidenceVaultItem.OwnerScope.APPLICATION,
+                        artifact_type="applicant_document",
+                        stage=EvidenceVaultItem.Stage.APPLICANT_INTAKE,
+                        is_current_version=True,
+                        is_archived=False,
+                    ).values_list("document_key", flat=True)
+                )
+            for requirement in self.document_requirements:
+                uploaded_file = cleaned_data.get(requirement.file_field_name)
+                if uploaded_file and uploaded_file.size > settings.MAX_EVIDENCE_UPLOAD_BYTES:
+                    self.add_error(
+                        requirement.file_field_name,
+                        "Uploaded file exceeds the configured Evidence Vault size limit.",
+                    )
+                    continue
+                if (
+                    not uploaded_file
+                    and requirement.is_required
+                    and requirement.code not in existing_document_codes
+                ):
+                    self.add_error(
+                        requirement.file_field_name,
+                        f"Upload the required document for {requirement.title}.",
+                    )
         return cleaned_data
 
 
@@ -276,6 +280,9 @@ class EvidenceUploadForm(BootstrapFormMixin, forms.Form):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields["label"].help_text = (
+            "Uploading another file with the same label during the same workflow stage creates a new preserved version."
+        )
         self._apply_bootstrap()
 
     def clean_file(self):
@@ -285,6 +292,93 @@ class EvidenceUploadForm(BootstrapFormMixin, forms.Form):
                 "Uploaded file exceeds the configured Evidence Vault size limit."
             )
         return uploaded_file
+
+
+class EvidenceVaultSearchForm(BootstrapFormMixin, forms.Form):
+    ARCHIVAL_STATUS_CHOICES = (
+        ("active", "Active Only"),
+        ("archived", "Archived Only"),
+        ("all", "All Evidence"),
+    )
+
+    q = forms.CharField(required=False, label="Search")
+    stage = forms.ChoiceField(
+        required=False,
+        choices=[("", "All stages"), *EvidenceVaultItem.Stage.choices],
+        label="Stage",
+    )
+    artifact_scope = forms.ChoiceField(
+        required=False,
+        choices=[("", "All ownership scopes"), *EvidenceVaultItem.OwnerScope.choices],
+        label="Ownership Scope",
+    )
+    archival_status = forms.ChoiceField(
+        required=False,
+        choices=ARCHIVAL_STATUS_CHOICES,
+        initial="active",
+        label="Archive State",
+    )
+    current_version_only = forms.BooleanField(
+        required=False,
+        initial=True,
+        label="Show current versions only",
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["q"].help_text = (
+            "Search by application ID, recruitment entry, document label, filename, SHA-256 hash, archive tag, or uploader."
+        )
+        self._apply_bootstrap()
+
+
+class AuditLogSearchForm(BootstrapFormMixin, forms.Form):
+    q = forms.CharField(required=False, label="Search")
+    action = forms.ChoiceField(
+        required=False,
+        choices=[("", "All actions"), *AuditLog.Action.choices],
+        label="Action",
+    )
+    actor_role = forms.ChoiceField(
+        required=False,
+        choices=[("", "All roles"), *RecruitmentUser.Role.choices],
+        label="Actor Role",
+    )
+    sensitive_only = forms.BooleanField(
+        required=False,
+        label="Sensitive access only",
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["q"].help_text = (
+            "Search by case reference, stage, description, or actor username."
+        )
+        self._apply_bootstrap()
+
+
+class EvidenceArchiveForm(BootstrapFormMixin, forms.Form):
+    ACTION_CHOICES = (
+        ("archive", "Archive"),
+        ("restore", "Restore"),
+    )
+
+    action = forms.ChoiceField(choices=ACTION_CHOICES)
+    archive_tag = forms.CharField(
+        required=False,
+        max_length=255,
+        label="Archive Tag",
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._apply_bootstrap()
+
+    def clean(self):
+        cleaned_data = super().clean()
+        if cleaned_data.get("action") == "archive" and not (cleaned_data.get("archive_tag") or "").strip():
+            self.add_error("archive_tag", "Archive tag is required when archiving an evidence item.")
+        return cleaned_data
 
 
 class WorkflowActionForm(BootstrapFormMixin, forms.Form):
@@ -319,6 +413,164 @@ class WorkflowReopenForm(BootstrapFormMixin, forms.Form):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._apply_bootstrap()
+
+
+class RequirementChecklistNotificationForm(BootstrapFormMixin, forms.Form):
+    checklist_items = forms.CharField(
+        widget=forms.Textarea(attrs={"rows": 5}),
+        help_text="List the required appointment or contract completion items to send to the applicant.",
+    )
+    deadline = forms.DateField(
+        required=False,
+        widget=forms.DateInput(attrs={"type": "date"}),
+    )
+    additional_message = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 3}),
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["checklist_items"].label = "Requirement Checklist"
+        self.fields["additional_message"].label = "Additional Instructions"
+        self._apply_bootstrap()
+
+    def clean_deadline(self):
+        deadline = self.cleaned_data["deadline"]
+        if deadline and deadline < timezone.localdate():
+            raise forms.ValidationError("Deadline cannot be earlier than today.")
+        return deadline
+
+
+class ReminderNotificationForm(BootstrapFormMixin, forms.Form):
+    reminder_subject = forms.CharField(max_length=255)
+    reminder_message = forms.CharField(widget=forms.Textarea(attrs={"rows": 4}))
+    deadline = forms.DateField(
+        required=False,
+        widget=forms.DateInput(attrs={"type": "date"}),
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["reminder_subject"].label = "Reminder Subject"
+        self.fields["reminder_message"].label = "Reminder Message"
+        self._apply_bootstrap()
+
+    def clean_deadline(self):
+        deadline = self.cleaned_data["deadline"]
+        if deadline and deadline < timezone.localdate():
+            raise forms.ValidationError("Deadline cannot be earlier than today.")
+        return deadline
+
+
+class CompletionTrackingForm(BootstrapFormMixin, forms.ModelForm):
+    class Meta:
+        model = CompletionRecord
+        fields = [
+            "completion_reference",
+            "completion_date",
+            "deadline",
+            "announcement_reference",
+            "announcement_date",
+            "remarks",
+        ]
+        widgets = {
+            "completion_date": forms.DateInput(attrs={"type": "date"}),
+            "deadline": forms.DateInput(attrs={"type": "date"}),
+            "announcement_date": forms.DateInput(attrs={"type": "date"}),
+            "remarks": forms.Textarea(attrs={"rows": 4}),
+        }
+
+    def __init__(self, *args, application=None, actor=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.application = application
+        if application is not None:
+            self.instance.application = application
+            if hasattr(application, "case"):
+                self.instance.recruitment_case = application.case
+            self.instance.branch = application.branch
+            self.instance.level = application.level
+        if actor is not None:
+            self.instance.tracked_by = actor
+        branch = getattr(application, "branch", "")
+        if branch == PositionPosting.Branch.PLANTILLA:
+            self.fields["completion_reference"].label = "Appointment Reference"
+            self.fields["completion_date"].label = "Appointment Date"
+            self.fields["announcement_reference"].label = "Announcement Reference"
+            self.fields["announcement_date"].label = "Announcement Date"
+        else:
+            self.fields["completion_reference"].label = "Contract Reference"
+            self.fields["completion_date"].label = "Contract Date"
+            self.fields.pop("announcement_reference")
+            self.fields.pop("announcement_date")
+        self.fields["deadline"].label = "Completion Deadline"
+        self.fields["remarks"].label = "Completion Notes"
+        self.fields["completion_reference"].required = False
+        self.fields["completion_date"].required = False
+        self.fields["deadline"].required = False
+        self.fields["remarks"].required = False
+        self._apply_bootstrap()
+
+    def clean_deadline(self):
+        deadline = self.cleaned_data["deadline"]
+        if deadline and deadline < timezone.localdate():
+            raise forms.ValidationError("Completion deadline cannot be earlier than today.")
+        return deadline
+
+
+class CompletionRequirementForm(BootstrapFormMixin, forms.ModelForm):
+    class Meta:
+        model = CompletionRequirement
+        fields = [
+            "item_label",
+            "status",
+            "notes",
+        ]
+        widgets = {
+            "notes": forms.Textarea(attrs={"rows": 2}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["item_label"].label = "Requirement Item"
+        self.fields["status"].label = "Status"
+        self.fields["notes"].label = "Notes"
+        self.fields["notes"].required = False
+        self._apply_bootstrap()
+
+
+class BaseCompletionRequirementFormSet(BaseInlineFormSet):
+    def clean(self):
+        super().clean()
+        active_forms = 0
+        for form in self.forms:
+            if not hasattr(form, "cleaned_data") or not form.cleaned_data:
+                continue
+            if form.cleaned_data.get("DELETE"):
+                continue
+            if (form.cleaned_data.get("item_label") or "").strip():
+                active_forms += 1
+        if active_forms == 0:
+            raise forms.ValidationError("Add at least one completion requirement item.")
+
+
+CompletionRequirementFormSet = inlineformset_factory(
+    CompletionRecord,
+    CompletionRequirement,
+    form=CompletionRequirementForm,
+    formset=BaseCompletionRequirementFormSet,
+    extra=3,
+    can_delete=True,
+)
+
+
+class CaseClosureForm(BootstrapFormMixin, forms.Form):
+    closure_notes = forms.CharField(widget=forms.Textarea(attrs={"rows": 3}))
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["closure_notes"].label = "Closure Notes"
         self._apply_bootstrap()
 
 

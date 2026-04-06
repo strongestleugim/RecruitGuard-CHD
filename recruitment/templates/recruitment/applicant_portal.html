@@ -7,145 +7,128 @@
     <section class="rg-public-intro" aria-labelledby="portal-heading">
         <div class="rg-public-intro__body">
             <h1 class="rg-public-intro__title" id="portal-heading">Official Recruitment Application Portal</h1>
-            <p class="rg-public-intro__copy">This portal is used for public submission of applications to current DOH-CHD CALABARZON recruitment entries. Applicants may proceed through the appropriate Plantilla or Contract of Service path, complete OTP verification, and use the issued Application ID to check submission status.</p>
-        </div>
-        <div class="rg-public-intro__actions">
-            <a href="#application-paths" class="btn btn-rg-primary">Start New Application</a>
-            <a href="{% url 'applicant-status-lookup' %}" class="btn btn-outline-secondary">Check Status</a>
+            <p class="rg-public-intro__copy">Browse current DOH-CHD CALABARZON recruitment openings. Select a vacancy to view details, then apply through the guided submission process.</p>
         </div>
     </section>
 
-    <section class="rg-public-guidance" aria-label="Applicant guidance">
-        <article class="rg-public-guidance__item">
-            <h2 class="rg-public-guidance__title">Portal Purpose</h2>
-            <p class="rg-public-guidance__copy">Submit applications only for currently advertised recruitment entries. Review the correct branch and entry details before proceeding.</p>
-        </article>
-        <article class="rg-public-guidance__item">
-            <h2 class="rg-public-guidance__title">Before Submission</h2>
-            <p class="rg-public-guidance__copy">Prepare all required information and supporting documents. Final submission is accepted only after successful OTP verification.</p>
-        </article>
-        <article class="rg-public-guidance__item">
-            <h2 class="rg-public-guidance__title">After Submission</h2>
-            <p class="rg-public-guidance__copy">Keep the generated Application ID. Use the Status Lookup page to view the latest recorded submission state.</p>
-        </article>
-    </section>
+    <div class="rg-vacancy-split" id="application-paths">
+        <div class="rg-vacancy-list">
+            <div class="rg-vacancy-list__header">
+                <h2 class="rg-vacancy-list__title">Vacancies List</h2>
+                <div class="rg-vacancy-filters">
+                    <input type="text" class="form-control" placeholder="Search by position, keywords..." id="vacancy-search">
+                    <select class="form-select" id="vacancy-level-filter">
+                        <option value="">Position Level: All</option>
+                        <option value="1">First</option>
+                        <option value="2">Second</option>
+                    </select>
+                    <select class="form-select" id="vacancy-deadline-filter">
+                        <option value="">Deadline: All</option>
+                        <option value="open">Open</option>
+                        <option value="closing">Closing Soon</option>
+                    </select>
+                </div>
+            </div>
+            {% for entry in plantilla_entries %}
+                <div class="rg-vacancy-card js-vacancy-card {% if forloop.first %}is-selected{% endif %}"
+                     data-entry-id="{{ entry.pk }}"
+                     data-title="{{ entry.title }}"
+                     data-code="{{ entry.job_code|default:'Not specified' }}"
+                     data-unit="{{ entry.unit|default:'CHD CALABARZON' }}"
+                     data-level="{{ entry.get_level_display }}"
+                     data-branch="{{ entry.get_branch_display }}"
+                     data-intake="{{ entry.get_intake_mode_display }}"
+                     data-closing="{% if entry.closing_date %}{{ entry.closing_date|date:'F d, Y' }}{% else %}Open while active{% endif %}"
+                     data-requirements="{{ entry.requirements|default:'Requirement details will be validated during the screening stage.' }}"
+                     data-qualification="{{ entry.qualification_reference|default:'No additional qualification reference posted.' }}"
+                     data-description="{{ entry.description|default:'Position details will be confirmed during screening and validation.' }}">
+                    <p class="rg-vacancy-card__title">{{ entry.title }}</p>
+                    <p class="rg-vacancy-card__meta">{{ entry.get_branch_display }} &middot; {{ entry.unit|default:"CHD CALABARZON" }}</p>
+                    <p class="rg-vacancy-card__meta">Posting: {% if entry.closing_date %}Until {{ entry.closing_date|date:"M d, Y" }}{% else %}Open{% endif %}</p>
+                    <span class="rg-vacancy-card__badge">Published</span>
+                </div>
+            {% endfor %}
+            {% for entry in cos_entries %}
+                <div class="rg-vacancy-card js-vacancy-card"
+                     data-entry-id="{{ entry.pk }}"
+                     data-title="{{ entry.title }}"
+                     data-code="{{ entry.job_code|default:'Not specified' }}"
+                     data-unit="{{ entry.unit|default:'CHD CALABARZON' }}"
+                     data-level="{{ entry.get_level_display }}"
+                     data-branch="{{ entry.get_branch_display }}"
+                     data-intake="{{ entry.get_intake_mode_display }}"
+                     data-closing="{% if entry.closing_date %}{{ entry.closing_date|date:'F d, Y' }}{% else %}Open while active{% endif %}"
+                     data-requirements="{{ entry.requirements|default:'Requirement details will be validated during the screening stage.' }}"
+                     data-qualification="{{ entry.qualification_reference|default:'No additional qualification reference posted.' }}"
+                     data-description="{{ entry.description|default:'COS intake details will be confirmed during screening.' }}">
+                    <p class="rg-vacancy-card__title">{{ entry.title }}</p>
+                    <p class="rg-vacancy-card__meta">{{ entry.get_branch_display }} &middot; {{ entry.unit|default:"CHD CALABARZON" }}</p>
+                    <p class="rg-vacancy-card__meta">Posting: {% if entry.closing_date %}Until {{ entry.closing_date|date:"M d, Y" }}{% else %}Open{% endif %}</p>
+                    <span class="rg-vacancy-card__badge">Published</span>
+                </div>
+            {% endfor %}
+            {% if not plantilla_entries and not cos_entries %}
+                <div style="padding:2rem;text-align:center;color:#5f6c78;">No active vacancies at this time.</div>
+            {% endif %}
+        </div>
 
-    <section class="rg-public-section" id="application-paths" aria-labelledby="application-paths-heading">
+        <div class="rg-vacancy-detail" id="vacancy-detail-panel">
+            {% with entries=plantilla_entries|default:cos_entries %}
+            {% if entries %}
+                {% with entry=entries.0 %}
+                <p class="rg-vacancy-detail__heading">Vacancy Detail</p>
+                <h2 class="rg-vacancy-detail__title" id="detail-title">{{ entry.title }}</h2>
+                <h3>Position Details</h3>
+                <ul id="detail-info">
+                    <li><strong>Item Number:</strong> <span id="detail-code">{{ entry.job_code|default:"Not specified" }}</span></li>
+                    <li><strong>Division:</strong> <span id="detail-unit">{{ entry.unit|default:"CHD CALABARZON" }}</span></li>
+                    <li><strong>Branch:</strong> <span id="detail-branch">{{ entry.get_branch_display }}</span></li>
+                </ul>
+
+                <h3>Qualification Standards (QS)</h3>
+                <p id="detail-qualification" style="font-size:.8125rem;color:#374151;">{{ entry.qualification_reference|default:"No additional qualification reference posted." }}</p>
+
+                <h3>Requirements</h3>
+                <p id="detail-requirements" style="font-size:.8125rem;color:#374151;">{{ entry.requirements|default:"Requirement details will be validated during the screening stage." }}</p>
+
+                <h3>Application Deadline</h3>
+                <p id="detail-closing" style="font-size:.8125rem;color:#374151;">{% if entry.closing_date %}{{ entry.closing_date|date:"F d, Y" }}{% else %}Open while active{% endif %}</p>
+
+                <div class="rg-vacancy-detail__privacy">
+                    <strong>Data Privacy Notice (summary)</strong><br>
+                    Your personal data will be used solely for recruitment purposes in accordance with the Data Privacy Act of 2012.
+                </div>
+
+                <div class="rg-vacancy-detail__actions">
+                    <a href="{% url 'applicant-intake' entry.pk %}" class="btn btn-rg-primary" id="detail-apply-btn">Apply Now</a>
+                </div>
+                <p class="rg-vacancy-detail__note">Note: Applicants submit without creating an account; email OTP required for submission.</p>
+                {% endwith %}
+            {% else %}
+                <p class="rg-vacancy-detail__heading">Vacancy Detail</p>
+                <p style="color:#5f6c78;font-size:.875rem;">Select a vacancy from the list to view details.</p>
+            {% endif %}
+            {% endwith %}
+        </div>
+    </div>
+
+    <section class="rg-public-section" id="help-section" aria-labelledby="help-heading">
         <div class="rg-public-section__header">
-            <h2 class="rg-public-section__title" id="application-paths-heading">Available Openings and Application Paths</h2>
-            <p class="rg-public-section__copy">Select the correct recruitment path before applying. Plantilla and Contract of Service entries are maintained separately and may have different intake conditions.</p>
+            <h2 class="rg-public-section__title" id="help-heading">Help &amp; Guidance</h2>
         </div>
-
-        <div class="rg-public-panel-grid">
-            <section class="rg-public-panel" aria-labelledby="plantilla-heading">
-                <div class="rg-public-panel__header">
-                    <div>
-                        <h3 class="rg-public-panel__title" id="plantilla-heading">Plantilla Recruitment</h3>
-                        <p class="rg-public-panel__copy">Permanent positions under the stricter policy-aware recruitment path.</p>
-                    </div>
-                    <p class="rg-public-panel__count">{{ plantilla_entries|length }} open position{{ plantilla_entries|length|pluralize }}</p>
-                </div>
-
-                <div class="rg-public-panel__body">
-                    {% if plantilla_entries %}
-                        {% for entry in plantilla_entries %}
-                            <article class="rg-public-opening rg-public-opening--plantilla">
-                                <div class="rg-public-opening__top">
-                                    <div>
-                                        <h4 class="rg-public-opening__title">{{ entry.title }}</h4>
-                                        <p class="rg-public-opening__code">Position Code: {{ entry.job_code|default:"Not specified" }}</p>
-                                    </div>
-                                    <a href="{% url 'applicant-intake' entry.pk %}" class="btn btn-rg-primary">Apply Now</a>
-                                </div>
-
-                                <div class="rg-public-opening__meta">
-                                    <div class="rg-public-opening__meta-item">
-                                        <span>Office/Unit</span>
-                                        <strong>{{ entry.unit|default:"Not specified" }}</strong>
-                                    </div>
-                                    <div class="rg-public-opening__meta-item">
-                                        <span>Routing Basis</span>
-                                        <strong>{{ entry.get_level_display }}</strong>
-                                    </div>
-                                    <div class="rg-public-opening__meta-item">
-                                        <span>Intake Type</span>
-                                        <strong>{{ entry.get_intake_mode_display }}</strong>
-                                    </div>
-                                    <div class="rg-public-opening__meta-item">
-                                        <span>Closing Date</span>
-                                        <strong>{% if entry.closing_date %}{{ entry.closing_date|date:"F d, Y" }}{% else %}Open while active{% endif %}</strong>
-                                    </div>
-                                </div>
-
-                                <div class="rg-public-opening__notes">
-                                    <span>Position Details</span>
-                                    <p>{{ entry.description|default:"Position details will be confirmed during screening and validation."|truncatewords:32 }}</p>
-                                </div>
-                            </article>
-                        {% endfor %}
-                    {% else %}
-                        <div class="rg-public-empty">
-                            <p class="rg-public-empty__title">No open Plantilla positions</p>
-                            <p class="rg-public-empty__copy">There are currently no active Plantilla entries available for public intake.</p>
-                        </div>
-                    {% endif %}
-                </div>
-            </section>
-
-            <section class="rg-public-panel" aria-labelledby="cos-heading">
-                <div class="rg-public-panel__header">
-                    <div>
-                        <h3 class="rg-public-panel__title" id="cos-heading">COS Recruitment</h3>
-                        <p class="rg-public-panel__copy">Opening-based, continuous, or pooling intake under the lighter flexible branch.</p>
-                    </div>
-                    <p class="rg-public-panel__count">{{ cos_entries|length }} open position{{ cos_entries|length|pluralize }}</p>
-                </div>
-
-                <div class="rg-public-panel__body">
-                    {% if cos_entries %}
-                        {% for entry in cos_entries %}
-                            <article class="rg-public-opening rg-public-opening--cos">
-                                <div class="rg-public-opening__top">
-                                    <div>
-                                        <h4 class="rg-public-opening__title">{{ entry.title }}</h4>
-                                        <p class="rg-public-opening__code">Position Code: {{ entry.job_code|default:"Not specified" }}</p>
-                                    </div>
-                                    <a href="{% url 'applicant-intake' entry.pk %}" class="btn btn-rg-primary">Apply Now</a>
-                                </div>
-
-                                <div class="rg-public-opening__meta">
-                                    <div class="rg-public-opening__meta-item">
-                                        <span>Office/Unit</span>
-                                        <strong>{{ entry.unit|default:"Not specified" }}</strong>
-                                    </div>
-                                    <div class="rg-public-opening__meta-item">
-                                        <span>Routing Basis</span>
-                                        <strong>{{ entry.get_level_display }}</strong>
-                                    </div>
-                                    <div class="rg-public-opening__meta-item">
-                                        <span>Intake Type</span>
-                                        <strong>{{ entry.get_intake_mode_display }}</strong>
-                                    </div>
-                                    <div class="rg-public-opening__meta-item">
-                                        <span>Closing Date</span>
-                                        <strong>{% if entry.closing_date %}{{ entry.closing_date|date:"F d, Y" }}{% else %}Open while active{% endif %}</strong>
-                                    </div>
-                                </div>
-
-                                <div class="rg-public-opening__notes">
-                                    <span>Position Details</span>
-                                    <p>{{ entry.description|default:"COS intake remains separate from Plantilla and follows lighter branch handling where applicable."|truncatewords:32 }}</p>
-                                </div>
-                            </article>
-                        {% endfor %}
-                    {% else %}
-                        <div class="rg-public-empty">
-                            <p class="rg-public-empty__title">No open COS positions</p>
-                            <p class="rg-public-empty__copy">There are currently no active Contract of Service entries available for public intake.</p>
-                        </div>
-                    {% endif %}
-                </div>
-            </section>
+        <div class="rg-public-guidance">
+            <article class="rg-public-guidance__item">
+                <h3 class="rg-public-guidance__title">How to Apply</h3>
+                <p class="rg-public-guidance__copy">Select a vacancy, review the requirements, click Apply Now, fill in your details, upload documents, and verify via OTP to submit.</p>
+            </article>
+            <article class="rg-public-guidance__item">
+                <h3 class="rg-public-guidance__title">Before Submission</h3>
+                <p class="rg-public-guidance__copy">Prepare all required documents. Final submission is accepted only after successful OTP verification.</p>
+            </article>
+            <article class="rg-public-guidance__item">
+                <h3 class="rg-public-guidance__title">After Submission</h3>
+                <p class="rg-public-guidance__copy">Keep the generated Application ID. Use the Track Application page to view the latest recorded status.</p>
+            </article>
         </div>
     </section>
 
@@ -154,4 +137,43 @@
         <p class="rg-public-footer__copy">Official applicant intake interface for RecruitGuard-CHD</p>
     </footer>
 </div>
+
+<script>
+(function(){
+    var cards = document.querySelectorAll('.js-vacancy-card');
+    var detailTitle = document.getElementById('detail-title');
+    var detailCode = document.getElementById('detail-code');
+    var detailUnit = document.getElementById('detail-unit');
+    var detailBranch = document.getElementById('detail-branch');
+    var detailQual = document.getElementById('detail-qualification');
+    var detailReqs = document.getElementById('detail-requirements');
+    var detailClosing = document.getElementById('detail-closing');
+    var detailBtn = document.getElementById('detail-apply-btn');
+    if(!detailTitle) return;
+    cards.forEach(function(card){
+        card.addEventListener('click', function(){
+            cards.forEach(function(c){c.classList.remove('is-selected');});
+            card.classList.add('is-selected');
+            detailTitle.textContent = card.dataset.title;
+            detailCode.textContent = card.dataset.code;
+            detailUnit.textContent = card.dataset.unit;
+            detailBranch.textContent = card.dataset.branch;
+            detailQual.textContent = card.dataset.qualification;
+            detailReqs.textContent = card.dataset.requirements;
+            detailClosing.textContent = card.dataset.closing;
+            if(detailBtn) detailBtn.href = '/apply/entries/' + card.dataset.entryId + '/';
+        });
+    });
+    var searchInput = document.getElementById('vacancy-search');
+    if(searchInput){
+        searchInput.addEventListener('input', function(){
+            var q = this.value.toLowerCase();
+            cards.forEach(function(c){
+                var t = (c.dataset.title||'').toLowerCase();
+                c.style.display = t.indexOf(q) !== -1 ? '' : 'none';
+            });
+        });
+    }
+})();
+</script>
 {% endblock %}

@@ -1,6 +1,6 @@
 # RecruitGuard-CHD
 
-RecruitGuard-CHD is a secure-by-design Django prototype for DOH-CHD CALABARZON recruitment. The current baseline includes internal identity and access control, recruitment entry and vacancy management, branch-aware applications, level-aware routing, audit logging, encrypted evidence storage, and controlled export.
+RecruitGuard-CHD is a secure-by-design Django prototype for DOH-CHD CALABARZON recruitment. The current baseline includes internal identity and access control, applicant intake with OTP verification, recruitment entry management, branch-aware workflow handling, level-aware routing, stage-locked records, notification history, encrypted evidence storage, audit logging, and controlled export.
 
 The UI is split into two portals while keeping one shared backend, one shared database, and one shared workflow engine:
 
@@ -12,24 +12,50 @@ The UI is split into two portals while keeping one shared backend, one shared da
 - One Django platform and one database schema
 - Internal authentication and role-aware access control for the locked internal actor set
 - Position catalog plus branch-aware recruitment entry management for Plantilla and COS
+- Public applicant intake, OTP verification, receipt, and status lookup
 - Branch-aware applications for Plantilla and COS
-- Level-aware submission routing
-  - Level 1 routes to Secretariat
-  - Level 2 routes to HRM Chief
-  - Secretariat is blocked from processing Level 2 unless a system-admin override is granted and audit-logged
-- COS follows a lighter path and skips HRMPSB endorsement
+- Level-aware submission routing with Level 1 -> Secretariat and Level 2 -> HRM Chief
+- Secretariat is blocked from processing Level 2 unless a system-admin override is granted and audit-logged
+- Branch-aware workflow handling for Plantilla and COS
+- Plantilla supports screening, exam, interview, deliberation, Comparative Assessment Report generation, final decision, completion tracking, and controlled case closure
+- COS follows a lighter path, skips HRMPSB endorsement, and supports the applicable screening, interview, deliberation, final decision, completion, and closure steps
+- Notification logging for submission, selection, non-selection, checklist, and reminder emails
 - Evidence Vault with SHA-256 digesting and AES-256-GCM encryption at rest
-- Controlled export package using ReportLab and zipfile
-- Admin registrations and test coverage for the core workflow
+- Application and system audit trails, routing history, and protected-record access logging
+- Controlled export package using ReportLab and zipfile with evidence inventory, routing history, audit log, submission packet, and verification outputs
+- Automated tests covering the major workflow, audit, notification, completion, and export paths
 
 ## Local setup
 
-1. Create and activate a virtual environment.
+### Quick start on Windows PowerShell
+
+```powershell
+cd C:\Users\Jerico\Documents\RecruitGuard-CHD
+.\.venv\Scripts\Activate.ps1
+python manage.py migrate
+python manage.py runserver
+```
+
+Open these URLs after the server starts:
+
+- Applicant portal: `http://127.0.0.1:8000/apply/`
+- Internal login: `http://127.0.0.1:8000/internal/login/`
+- Django admin: `http://127.0.0.1:8000/admin/`
+
+### First-time setup
+
+1. Create and activate a virtual environment if `.venv` does not already exist.
 2. Install dependencies with `pip install -r requirements.txt`.
-3. Copy `.env.example` to `.env` and set the required secrets and environment values.
+3. Copy `.env.example` to `.env` and set the required values for:
+   - `DJANGO_SECRET_KEY`
+   - `APPLICATION_OTP_HASH_SECRET`
+   - `EVIDENCE_ENCRYPTION_SECRET`
+   - Gmail SMTP settings such as `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, and `DEFAULT_FROM_EMAIL`
 4. Run `python manage.py migrate`.
 5. Create an admin account with `python manage.py createsuperuser`.
-6. Start the server with `python manage.py runserver`.
+6. Run `python manage.py check`.
+7. Run the test suite with `python manage.py test recruitment`.
+8. Start the server with `python manage.py runserver`.
 
 SQLite is used automatically for local development if PostgreSQL environment variables are not set. PostgreSQL settings remain ready for later deployment, and media/static paths plus basic security cookie settings are already configured in the base project.
 

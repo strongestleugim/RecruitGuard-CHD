@@ -1,15 +1,14 @@
 {% extends "internal_base.html" %}
 {% load recruitment_ui %}
 
-{% block internal_content %}
+{% block content %}
 <div class="rg-page-header">
     <div>
         <p class="rg-eyebrow">Recruitment Entry Management</p>
         <h1 class="rg-page-title">Recruitment Entries</h1>
-        <p class="rg-page-copy">Manage Plantilla vacancies and COS openings or pooling entries within the shared internal administration portal, without changing the underlying backend or branch-specific workflow logic.</p>
+        <p class="rg-page-copy">Manage Plantilla vacancies and COS openings or pooling entries without changing the shared backend or branch-specific workflow logic.</p>
     </div>
     <div class="rg-page-actions">
-        <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary">Dashboard</a>
         <a href="{% url 'position-catalog-list' %}" class="btn btn-outline-secondary">Position Catalog</a>
         <a href="{% url 'recruitment-entry-create' %}" class="btn btn-rg-primary">New Entry</a>
     </div>
@@ -36,11 +35,6 @@
         <strong class="rg-kpi__value">Internal</strong>
         <span class="rg-kpi__hint">Entry management stays staff-facing</span>
     </div>
-</div>
-
-<div class="rg-admin-note mb-4">
-    <strong>Branch-aware entry control</strong>
-    <p>Use this page to maintain intake windows, branch differences, and level-aware routing basis while preserving one shared workflow engine and one database across the system.</p>
 </div>
 
 <div class="rg-table-shell">

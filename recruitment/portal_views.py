@@ -53,7 +53,7 @@ class ApplicantPortalIntakeView(FormView):
             application = create_public_application_draft(
                 entry=self.entry,
                 cleaned_data=form.cleaned_data,
-                uploaded_documents=form.get_uploaded_documents(),
+                requirement_uploads=form.get_requirement_uploads(),
             )
         except ValueError as exc:
             form.add_error(None, str(exc))
@@ -87,8 +87,6 @@ class ApplicantOTPView(TemplateView):
         context["application"] = application
         context["otp_form"] = kwargs.get("otp_form") or ApplicantOTPForm()
         context["otp_validity_minutes"] = settings.APPLICATION_OTP_VALIDITY_MINUTES
-        context["document_requirement_statuses"] = application.document_requirement_statuses
-        context["document_requirements_complete"] = application.has_complete_required_documents
         return context
 
     def post(self, request, *args, **kwargs):

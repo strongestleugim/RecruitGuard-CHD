@@ -25,10 +25,10 @@ It uses level-aware internal routing:
 - InterviewRating
 - DeliberationRecord
 - ComparativeAssessmentReport
-- CARItem
+- ComparativeAssessmentReportItem
 - FinalDecision
 - CompletionRecord
-- RecruitmentArtifact
+- EvidenceVaultItem
 - AuditLog
 
 ## Core Distinctions
@@ -37,7 +37,8 @@ It uses level-aware internal routing:
 - Application is separate from RecruitmentCase
 - Plantilla and COS are separate branches within one system
 - Level classification / routing basis is a workflow control
-- Evidence files are stored as controlled recruitment artifacts
+- ComparativeAssessmentReport is operationally aligned at the recruitment-entry level, while ComparativeAssessmentReportItem remains case-linked for ranked rows
+- Evidence Vault files are stored as controlled records owned at the application, recruitment-case, or recruitment-entry level
 - Audit logging is a system-wide accountability requirement
 
 ## Key Relationship Rules
@@ -51,10 +52,12 @@ It uses level-aware internal routing:
 - One InterviewSession can have many InterviewRating records
 - One RecruitmentEntry can have many DeliberationRecord entries
 - One RecruitmentEntry can have many ComparativeAssessmentReport versions where applicable
-- One ComparativeAssessmentReport can have many CARItem rows
+- One ComparativeAssessmentReport can have many ComparativeAssessmentReportItem rows
 - One RecruitmentEntry can have many FinalDecision records over time where applicable
+- One Application can have many EvidenceVaultItem records
 - One RecruitmentCase may have one CompletionRecord
-- One RecruitmentCase can have many RecruitmentArtifact records
+- One RecruitmentCase can have many EvidenceVaultItem records
+- One RecruitmentEntry can have many EvidenceVaultItem records
 - One RecruitmentCase can have many AuditLog records
 
 ## Routing Rules
@@ -65,7 +68,7 @@ It uses level-aware internal routing:
 - Controlled override is allowed only if explicitly implemented and audit-logged
 
 ## Evidence Rules
-- RecruitmentArtifact stores file metadata, case/stage association, and version information
+- EvidenceVaultItem stores file metadata, ownership scope, stage association, and version information
 - SHA-256 hash values are preserved for evidence integrity
 - Selected sensitive stored data may use AES-256-GCM protection where applicable
 - Export bundles are controlled outputs derived from stored artifacts and logged actions

@@ -19,7 +19,11 @@ ENTRY_MANAGER_ROLES = {
 
 
 def is_internal_user(user):
-    return bool(getattr(user, "is_authenticated", False) and getattr(user, "is_active", False) and getattr(user, "is_internal_user", False))
+    return bool(
+        getattr(user, "is_authenticated", False)
+        and getattr(user, "is_active", False)
+        and getattr(user, "is_internal_user", False)
+    )
 
 
 def has_role(user, *roles):

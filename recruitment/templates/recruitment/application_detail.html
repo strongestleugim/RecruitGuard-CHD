@@ -1,15 +1,18 @@
 {% extends "internal_base.html" %}
 {% load recruitment_ui %}
 
-{% block internal_content %}
-{% workflow_stages application.branch as workflow_steps %}
+{% block internal_title %}{{ application.reference_label }}{% endblock %}
 
-<div class="rg-page-header">
+{% block content %}
+{% workflow_stages application.branch as workflow_steps %}
+{% pipeline_stages as pipe_stages %}
+
+<div class="rg-page-header" style="border-bottom:none;padding-bottom:0;">
     <div class="rg-case-head">
         <div>
-            <p class="rg-eyebrow">Internal Case View</p>
-            <h1 class="rg-page-title">{{ application.reference_label }}</h1>
-            <p class="rg-page-copy">{{ application.position.title }} | {{ application.position.job_code }} | {{ application.applicant_display_name }} | Staff-only operational record for workflow, evaluation, evidence, and controlled decisions.</p>
+            <p class="rg-eyebrow">Case Workspace</p>
+            <h1 class="rg-page-title" style="font-size:1.5rem;">{{ application.reference_label }}</h1>
+            <p class="rg-page-copy" style="font-size:.8125rem;">{{ application.position.title }} | {{ application.position.job_code }} | {{ application.applicant_display_name }}</p>
         </div>
         <div class="rg-case-meta">
             <span class="rg-pill rg-pill--{{ application.branch|branch_theme }}">{{ application.get_branch_display }}</span>
@@ -32,651 +35,611 @@
     </div>
 </div>
 
-<div class="card p-4 mb-4 rg-detail-anchor" id="workflow-routing">
-    <div class="rg-section__header">
-        <div>
-            <p class="rg-eyebrow">Workflow Status</p>
-            <h2 class="h4 mb-1">Current routing and stage state</h2>
-            <p class="rg-section-copy">The display below is branch-aware and follows the implemented workflow path without changing the routing rules.</p>
-        </div>
-        {% if recruitment_case %}
-            <div class="d-flex flex-wrap gap-2">
-                <span class="rg-pill rg-pill--{{ recruitment_case.case_status|status_theme }}">{{ recruitment_case.get_case_status_display }}</span>
-                {% if recruitment_case.is_stage_locked %}
-                    <span class="rg-pill rg-pill--warning">Stage Locked</span>
-                {% else %}
-                    <span class="rg-pill rg-pill--info">Active Workflow</span>
-                {% endif %}
-            </div>
-        {% endif %}
-    </div>
-
-    {% if recruitment_case %}
-        <div class="rg-progress-track">
-            {% for step in workflow_steps %}
-                {% workflow_stage_state application.branch recruitment_case.current_stage step.value recruitment_case.case_status as step_state %}
-                <div class="rg-progress-step is-{{ step_state }}">
-                    <span class="rg-progress-step__label">{{ step.short_label }}</span>
-                    <span class="rg-progress-step__meta">{{ step.label }}</span>
+<!-- ── Recruitment Pipeline ── -->
+<div class="card p-3 mb-4">
+    <div class="rg-pipeline" style="justify-content:center;">
+        {% for stage in pipe_stages %}
+            {% pipeline_stage_state recruitment_case.current_stage recruitment_case.case_status stage.key as pstate %}
+            <div class="rg-pipeline__stage is-{{ pstate }}">
+                <div class="rg-pipeline__circle">
+                    {% if pstate == "complete" %}✓{% else %}{{ forloop.counter }}{% endif %}
                 </div>
-            {% endfor %}
-        </div>
-    {% else %}
-        <div class="rg-empty-state">A recruitment case has not been created for this application yet.</div>
-    {% endif %}
+                <span class="rg-pipeline__label">{{ stage.label }}</span>
+            </div>
+            {% if not forloop.last %}
+                <div class="rg-pipeline__connector {% if pstate == 'complete' %}is-complete{% endif %}"></div>
+            {% endif %}
+        {% endfor %}
+    </div>
+</div>
+
+<!-- ── Workspace Tabs ── -->
+<div class="rg-workspace-tabs">
+    <a href="#workflow-routing" class="rg-workspace-tab">Overview</a>
+    <a href="#stage-sections" class="rg-workspace-tab is-active">Case Workspace</a>
+    <a href="#evidence-section" class="rg-workspace-tab">Evidence</a>
+    <a href="#timeline-section" class="rg-workspace-tab">Timeline</a>
+</div>
+
+<!-- ── Stage Sub-tabs ── -->
+<div class="rg-stage-tabs" id="stage-sections">
+    <a href="#section-screening" class="rg-stage-tab js-stage-tab is-active" data-section="section-screening">Screening</a>
+    <a href="#section-exam" class="rg-stage-tab js-stage-tab" data-section="section-exam">Exam</a>
+    <a href="#section-interview" class="rg-stage-tab js-stage-tab" data-section="section-interview">Interview</a>
+    <a href="#section-deliberation" class="rg-stage-tab js-stage-tab" data-section="section-deliberation">Deliberation/CAR</a>
+    <a href="#section-decision" class="rg-stage-tab js-stage-tab" data-section="section-decision">Decision</a>
+    <a href="#section-completion" class="rg-stage-tab js-stage-tab" data-section="section-completion">Completion</a>
+    <a href="#section-workflow-action" class="rg-stage-tab js-stage-tab" data-section="section-workflow-action">Actions</a>
 </div>
 
 <div class="row g-4">
+    <!-- ── Main Working Panel (Left) ── -->
     <div class="col-xl-7">
-        <div class="card p-4 mb-4">
-            <h2 class="h4 mb-3">Application Summary</h2>
+
+        <!-- Overview: Applicant Info -->
+        <div class="card p-4 mb-4 rg-detail-anchor" id="workflow-routing">
+            <div class="rg-section__header">
+                <div>
+                    <p class="rg-eyebrow">Applicant Snapshot</p>
+                    <h2 class="h4 mb-1">Case Overview</h2>
+                </div>
+            </div>
             <div class="rg-info-list">
                 <div class="rg-info-row">
                     <div class="rg-info-row__label">Applicant</div>
                     <div class="rg-info-row__value">{{ application.applicant_display_name }}</div>
                 </div>
                 <div class="rg-info-row">
-                    <div class="rg-info-row__label">Applicant Email</div>
+                    <div class="rg-info-row__label">Email</div>
                     <div class="rg-info-row__value">{{ application.applicant_email }}</div>
                 </div>
+                {% if application.applicant_phone %}
                 <div class="rg-info-row">
-                    <div class="rg-info-row__label">Status</div>
-                    <div class="rg-info-row__value"><span class="rg-pill rg-pill--{{ application.status|status_theme }}">{{ application.get_status_display }}</span></div>
+                    <div class="rg-info-row__label">Phone</div>
+                    <div class="rg-info-row__value">{{ application.applicant_phone }}</div>
+                </div>
+                {% endif %}
+                <div class="rg-info-row">
+                    <div class="rg-info-row__label">Position</div>
+                    <div class="rg-info-row__value">{{ application.position.title }} ({{ application.position.job_code }})</div>
                 </div>
                 <div class="rg-info-row">
-                    <div class="rg-info-row__label">Recruitment Entry</div>
-                    <div class="rg-info-row__value">{{ application.position.job_code }} | {{ application.position.get_intake_mode_display }}</div>
+                    <div class="rg-info-row__label">Submitted</div>
+                    <div class="rg-info-row__value">{{ application.submitted_at|date:"M d, Y H:i" }}</div>
                 </div>
+                {% if application.qualification_summary %}
                 <div class="rg-info-row">
-                    <div class="rg-info-row__label">Current Handler</div>
-                    <div class="rg-info-row__value">
-                        {% if application.current_handler_role %}
-                            <span class="rg-pill rg-pill--{{ application.current_handler_role|role_theme }}">{{ application.current_handler_role|role_label }}</span>
-                        {% else %}
-                            <span class="rg-pill rg-pill--neutral">Closed</span>
-                        {% endif %}
-                    </div>
+                    <div class="rg-info-row__label">Qualification Summary</div>
+                    <div class="rg-info-row__value">{{ application.qualification_summary }}</div>
                 </div>
+                {% endif %}
+                {% if application.cover_letter %}
                 <div class="rg-info-row">
-                    <div class="rg-info-row__label">Submission Hash</div>
-                    <div class="rg-info-row__value"><code>{{ application.submission_hash|default:"Not submitted yet" }}</code></div>
+                    <div class="rg-info-row__label">Cover Letter</div>
+                    <div class="rg-info-row__value">{{ application.cover_letter }}</div>
                 </div>
+                {% endif %}
             </div>
-            <hr>
-            <h3 class="h5 mb-2">Qualification Summary</h3>
-            <p>{{ application.qualification_summary }}</p>
-            <h3 class="h5 mb-2">Cover Letter</h3>
-            <p class="mb-0">{{ application.cover_letter|default:"No cover letter provided." }}</p>
         </div>
 
-        {% if recruitment_case %}
+        <!-- ── Screening Section ── -->
+        <div class="rg-stage-section" id="section-screening">
+        {% if screening_form %}
             <div class="card p-4 mb-4">
-                <h2 class="h4 mb-3">Recruitment Case</h2>
-                <div class="rg-info-list">
-                    <div class="rg-info-row">
-                        <div class="rg-info-row__label">Current Stage</div>
-                        <div class="rg-info-row__value">{{ recruitment_case.get_current_stage_display }}</div>
+                <h2 class="h4 mb-2">Qualification Screening</h2>
+                <p class="rg-note mb-3">Record completeness findings, qualification outcome, and screening notes before endorsing the case.</p>
+                <form method="post" action="{% url 'screening-review' application.pk %}">
+                    {% csrf_token %}
+                    <div class="rg-form-grid">
+                        {% for field in screening_form %}
+                            {% include "recruitment/includes/form_field.html" with field=field %}
+                        {% endfor %}
                     </div>
-                    <div class="rg-info-row">
-                        <div class="rg-info-row__label">Case Status</div>
-                        <div class="rg-info-row__value"><span class="rg-pill rg-pill--{{ recruitment_case.case_status|status_theme }}">{{ recruitment_case.get_case_status_display }}</span></div>
+                    <div class="rg-form-actions">
+                        <button type="submit" name="operation" value="save" class="btn btn-outline-secondary">Save Screening</button>
+                        <button type="submit" name="operation" value="finalize" class="btn btn-rg-primary">Finalize Screening</button>
                     </div>
-                    <div class="rg-info-row">
-                        <div class="rg-info-row__label">Current Handler</div>
-                        <div class="rg-info-row__value">
-                            {% if recruitment_case.current_handler_role %}
-                                <span class="rg-pill rg-pill--{{ recruitment_case.current_handler_role|role_theme }}">{{ recruitment_case.current_handler_role|role_label }}</span>
-                            {% else %}
-                                <span class="rg-pill rg-pill--neutral">Closed</span>
-                            {% endif %}
-                        </div>
+                </form>
+            </div>
+        {% elif screening_locked and current_screening_record %}
+            <div class="card p-4 mb-4">
+                <h2 class="h4 mb-2">Qualification Screening</h2>
+                <div class="rg-empty-state">The screening output for {{ current_screening_record.get_review_stage_display }} is finalized and locked. 🔒</div>
+            </div>
+        {% endif %}
+        </div>
+
+        <!-- ── Exam Section ── -->
+        <div class="rg-stage-section" id="section-exam" style="display:none;">
+        {% if exam_form %}
+            <div class="card p-4 mb-4">
+                <h2 class="h4 mb-2">Examination Management</h2>
+                <p class="rg-note mb-3">
+                    {% if application.branch == "plantilla" %}
+                        Record exam type, result, score, validity period, or a justified waiver or absence for this Plantilla case.
+                    {% else %}
+                        Record the COS examination decision only when the office applies one. Waiver or absence may be finalized with remarks.
+                    {% endif %}
+                </p>
+                <form method="post" action="{% url 'exam-review' application.pk %}">
+                    {% csrf_token %}
+                    <div class="rg-form-grid">
+                        {% for field in exam_form %}
+                            {% include "recruitment/includes/form_field.html" with field=field %}
+                        {% endfor %}
                     </div>
-                    <div class="rg-info-row">
-                        <div class="rg-info-row__label">Lock State</div>
-                        <div class="rg-info-row__value">
-                            {% if recruitment_case.is_stage_locked %}
-                                <span class="rg-pill rg-pill--warning">Locked{% if recruitment_case.locked_stage %} at {{ recruitment_case.locked_stage|stage_label }}{% endif %}</span>
-                            {% else %}
-                                <span class="rg-pill rg-pill--info">Active</span>
-                            {% endif %}
-                        </div>
+                    <div class="rg-form-actions">
+                        <button type="submit" name="operation" value="save" class="btn btn-outline-secondary">Save Exam</button>
+                        <button type="submit" name="operation" value="finalize" class="btn btn-rg-primary">Finalize Exam</button>
                     </div>
-                </div>
+                </form>
+            </div>
+        {% elif exam_locked and current_exam_record %}
+            <div class="card p-4 mb-4">
+                <h2 class="h4 mb-2">Examination Management</h2>
+                <div class="rg-empty-state">The examination output for {{ current_exam_record.get_review_stage_display }} is finalized and locked. 🔒</div>
+            </div>
+        {% endif %}
+        </div>
+
+        <!-- ── Interview Section ── -->
+        <div class="rg-stage-section" id="section-interview" style="display:none;">
+        {% if interview_session_form %}
+            <div class="card p-4 mb-4">
+                <h2 class="h4 mb-2">Interview Scheduling</h2>
+                <p class="rg-note mb-3">Schedule the interview for the current stage, then finalize the session only after the rating output or fallback sheet is complete.</p>
+                <form method="post" action="{% url 'interview-session' application.pk %}">
+                    {% csrf_token %}
+                    <div class="rg-form-grid">
+                        {% for field in interview_session_form %}
+                            {% include "recruitment/includes/form_field.html" with field=field %}
+                        {% endfor %}
+                    </div>
+                    <div class="rg-form-actions">
+                        <button type="submit" name="operation" value="save" class="btn btn-outline-secondary">Save Interview Session</button>
+                        <button type="submit" name="operation" value="finalize" class="btn btn-rg-primary">Finalize Interview Session</button>
+                    </div>
+                </form>
+            </div>
+        {% elif interview_session_locked and current_interview_session %}
+            <div class="card p-4 mb-4">
+                <h2 class="h4 mb-2">Interview Scheduling</h2>
+                <div class="rg-empty-state">The interview session for {{ current_interview_session.get_review_stage_display }} is finalized and locked. 🔒</div>
             </div>
         {% endif %}
 
-        <div class="card p-4 mb-4 rg-detail-anchor" id="screening-evaluation">
-            <h2 class="h4 mb-3">Screening Record</h2>
-            <div class="rg-form-section mb-3">
-                <h3 class="rg-form-section__title">Qualification Basis</h3>
-                <p class="mb-2"><strong>Position Requirements:</strong> {{ application.position.requirements|default:"No requirements recorded." }}</p>
-                <p class="mb-0"><strong>Qualification Reference:</strong> {{ application.position.qualification_reference|default:"No qualification reference recorded." }}</p>
+        {% if interview_rating_form %}
+            <div class="card p-4 mb-4">
+                <h2 class="h4 mb-2">Interview Rating Entry</h2>
+                <p class="rg-note mb-3">Record the direct interview rating for the current evaluator role.</p>
+                <form method="post" action="{% url 'interview-rating' application.pk %}">
+                    {% csrf_token %}
+                    <div class="rg-form-grid">
+                        {% for field in interview_rating_form %}
+                            {% include "recruitment/includes/form_field.html" with field=field %}
+                        {% endfor %}
+                    </div>
+                    <div class="rg-form-actions">
+                        <button type="submit" class="btn btn-rg-primary">Save Interview Rating</button>
+                    </div>
+                </form>
             </div>
-            {% if screening_records %}
-                <div class="rg-list-stack">
-                    {% for screening in screening_records %}
-                        <article class="rg-record">
-                            <div class="rg-record__header">
-                                <div>
-                                    <strong>{{ screening.get_review_stage_display }}</strong>
-                                    <div class="rg-record__meta">{{ screening.reviewed_by_role|role_label }}{% if screening.reviewed_by %} | {{ screening.reviewed_by }}{% endif %}</div>
-                                </div>
-                                <span class="rg-note">{{ screening.created_at|date:"M d, Y H:i" }}</span>
-                            </div>
-                            <div class="d-flex flex-wrap gap-2 mb-3">
-                                <span class="rg-pill rg-pill--{{ screening.completeness_status|status_theme }}">{{ screening.get_completeness_status_display }}</span>
-                                <span class="rg-pill rg-pill--{{ screening.qualification_outcome|status_theme }}">{{ screening.get_qualification_outcome_display }}</span>
-                                <span class="rg-pill rg-pill--{% if screening.is_finalized %}success{% else %}neutral{% endif %}">{% if screening.is_finalized %}Finalized{% else %}Draft{% endif %}</span>
-                            </div>
-                            <p class="mb-2"><strong>Completeness Notes:</strong> {{ screening.completeness_notes }}</p>
-                            <p class="mb-2"><strong>Screening Notes:</strong> {{ screening.screening_notes }}</p>
-                            <p class="mb-0 rg-note">
-                                {% if screening.is_finalized %}
-                                    Finalized by {{ screening.finalized_by_role|role_label }} on {{ screening.finalized_at|date:"M d, Y H:i" }}
-                                {% else %}
-                                    Draft screening output
-                                {% endif %}
-                            </p>
-                        </article>
-                    {% endfor %}
-                </div>
-            {% else %}
-                <div class="rg-empty-state">No screening output recorded yet.</div>
-            {% endif %}
-        </div>
-
-        <div class="card p-4 mb-4 rg-detail-anchor" id="examination">
-            <h2 class="h4 mb-3">Examination Record</h2>
-            <p class="rg-note mb-3">
-                {% if application.branch == "plantilla" %}
-                    Plantilla cases may preserve formal examination outputs as part of the stricter review path.
-                {% else %}
-                    COS cases may preserve examination data when the office applies an exam, waiver, or absence control.
-                {% endif %}
-            </p>
-            {% if exam_records %}
-                <div class="rg-list-stack">
-                    {% for exam in exam_records %}
-                        <article class="rg-record">
-                            <div class="rg-record__header">
-                                <div>
-                                    <strong>{{ exam.get_review_stage_display }}</strong>
-                                    <div class="rg-record__meta">{{ exam.recorded_by_role|role_label }}{% if exam.recorded_by %} | {{ exam.recorded_by }}{% endif %}</div>
-                                </div>
-                                <span class="rg-note">{{ exam.created_at|date:"M d, Y H:i" }}</span>
-                            </div>
-                            <div class="d-flex flex-wrap gap-2 mb-3">
-                                <span class="rg-pill rg-pill--{{ exam.exam_status|status_theme }}">{{ exam.get_exam_status_display }}</span>
-                                <span class="rg-pill rg-pill--{% if exam.is_finalized %}success{% else %}neutral{% endif %}">{% if exam.is_finalized %}Finalized{% else %}Draft{% endif %}</span>
-                            </div>
-                            <p class="mb-1"><strong>Exam Type:</strong> {{ exam.exam_type }}</p>
-                            <p class="mb-1"><strong>Exam Score:</strong> {{ exam.exam_score|default_if_none:"Not recorded" }}</p>
-                            <p class="mb-1"><strong>Exam Result:</strong> {{ exam.exam_result|default:"Not recorded" }}</p>
-                            <p class="mb-1">
-                                <strong>Validity:</strong>
-                                {% if exam.valid_from or exam.valid_until %}
-                                    {{ exam.valid_from|date:"M d, Y"|default:"Open" }} to {{ exam.valid_until|date:"M d, Y"|default:"Open" }}
-                                {% else %}
-                                    Not recorded
-                                {% endif %}
-                            </p>
-                            <p class="mb-1"><strong>Exam Notes:</strong> {{ exam.exam_notes|default:"No remarks recorded." }}</p>
-                            <p class="mb-0 rg-note">
-                                {% if exam.is_finalized %}
-                                    Finalized by {{ exam.finalized_by_role|role_label }} on {{ exam.finalized_at|date:"M d, Y H:i" }}
-                                {% else %}
-                                    Draft examination output
-                                {% endif %}
-                            </p>
-                        </article>
-                    {% endfor %}
-                </div>
-            {% else %}
-                <div class="rg-empty-state">No examination output recorded yet.</div>
-            {% endif %}
-        </div>
-
-        <div class="card p-4 mb-4 rg-detail-anchor" id="interview-ratings">
-            <h2 class="h4 mb-3">Interview Sessions and Ratings</h2>
-            <p class="rg-note mb-3">
-                {% if application.branch == "plantilla" %}
-                    Plantilla cases may preserve interview schedules, evaluator ratings, and fallback scanned sheets across the later evaluation stages where applicable.
-                {% else %}
-                    COS cases may preserve interview schedules, HRM Chief ratings, and fallback scanned sheets as part of the lighter but still traceable path.
-                {% endif %}
-            </p>
-            {% if interview_sessions %}
-                <div class="rg-list-stack">
-                    {% for interview_session in interview_sessions %}
-                        <article class="rg-record">
-                            <div class="rg-record__header">
-                                <div>
-                                    <strong>{{ interview_session.get_review_stage_display }}</strong>
-                                    <div class="rg-record__meta">{{ interview_session.scheduled_by_role|role_label }}{% if interview_session.scheduled_by %} | {{ interview_session.scheduled_by }}{% endif %}</div>
-                                </div>
-                                <span class="rg-note">{{ interview_session.created_at|date:"M d, Y H:i" }}</span>
-                            </div>
-                            <div class="d-flex flex-wrap gap-2 mb-3">
-                                <span class="rg-pill rg-pill--info">{{ interview_session.scheduled_for|date:"M d, Y H:i" }}</span>
-                                <span class="rg-pill rg-pill--{% if interview_session.is_finalized %}success{% else %}neutral{% endif %}">{% if interview_session.is_finalized %}Finalized{% else %}Draft{% endif %}</span>
-                                <span class="rg-pill rg-pill--neutral">{{ interview_session.ratings.count }} rating{{ interview_session.ratings.count|pluralize }}</span>
-                                <span class="rg-pill rg-pill--neutral">{{ interview_session.fallback_evidence_items|length }} fallback file{{ interview_session.fallback_evidence_items|length|pluralize }}</span>
-                            </div>
-                            <p class="mb-1"><strong>Location / Medium:</strong> {{ interview_session.location }}</p>
-                            <p class="mb-2"><strong>Session Notes:</strong> {{ interview_session.session_notes|default:"No session notes recorded." }}</p>
-                            {% if interview_session.ratings.all %}
-                                <div class="rg-list-stack mb-3">
-                                    {% for rating in interview_session.ratings.all %}
-                                        <article class="rg-record">
-                                            <div class="rg-record__header">
-                                                <div>
-                                                    <strong>{{ rating.rated_by_role|role_label }}</strong>
-                                                    <div class="rg-record__meta">{% if rating.rated_by %}{{ rating.rated_by }}{% endif %}</div>
-                                                </div>
-                                                <span class="rg-note">{{ rating.created_at|date:"M d, Y H:i" }}</span>
-                                            </div>
-                                            <p class="mb-1"><strong>Rating Score:</strong> {{ rating.rating_score }}</p>
-                                            <p class="mb-1"><strong>Rating Notes:</strong> {{ rating.rating_notes|default:"No rating notes recorded." }}</p>
-                                            <p class="mb-0"><strong>Justification:</strong> {{ rating.justification|default:"Not required." }}</p>
-                                        </article>
-                                    {% endfor %}
-                                </div>
-                            {% else %}
-                                <div class="rg-empty-state mb-3">No direct interview ratings recorded yet for this session.</div>
-                            {% endif %}
-                            {% if interview_session.fallback_evidence_items %}
-                                <div class="rg-list-stack mb-3">
-                                    {% for fallback in interview_session.fallback_evidence_items %}
-                                        <article class="rg-record">
-                                            <div class="rg-record__header">
-                                                <div>
-                                                    <strong>{{ fallback.label }}</strong>
-                                                    <div class="rg-record__meta">{{ fallback.original_filename }} | {{ fallback.size_bytes }} bytes</div>
-                                                </div>
-                                                <a href="{% url 'evidence-download' application.pk fallback.pk %}" class="btn btn-outline-secondary btn-sm">Download</a>
-                                            </div>
-                                            <code>{{ fallback.sha256_digest }}</code>
-                                        </article>
-                                    {% endfor %}
-                                </div>
-                            {% endif %}
-                            <p class="mb-0 rg-note">
-                                {% if interview_session.is_finalized %}
-                                    Finalized by {{ interview_session.finalized_by_role|role_label }} on {{ interview_session.finalized_at|date:"M d, Y H:i" }}
-                                {% else %}
-                                    Draft interview session output
-                                {% endif %}
-                            </p>
-                        </article>
-                    {% endfor %}
-                </div>
-            {% else %}
-                <div class="rg-empty-state">No interview sessions or ratings recorded yet.</div>
-            {% endif %}
-        </div>
-
-        <div class="card p-4 mb-4 rg-detail-anchor" id="deliberation-support">
-            <h2 class="h4 mb-3">Deliberation and Decision Support</h2>
-            <p class="rg-note mb-3">
-                {% if application.branch == "plantilla" %}
-                    Plantilla cases preserve deliberation minutes, ranking support, and the Comparative Assessment Report before recommendation to the Appointing Authority.
-                {% else %}
-                    COS cases preserve deliberation minutes and consolidated decision-support outputs before endorsement to the Appointing Authority.
-                {% endif %}
-            </p>
-            {% if deliberation_records %}
-                <div class="rg-list-stack">
-                    {% for deliberation in deliberation_records %}
-                        <article class="rg-record">
-                            <div class="rg-record__header">
-                                <div>
-                                    <strong>{{ deliberation.get_review_stage_display }}</strong>
-                                    <div class="rg-record__meta">{{ deliberation.recorded_by_role|role_label }}{% if deliberation.recorded_by %} | {{ deliberation.recorded_by }}{% endif %}</div>
-                                </div>
-                                <span class="rg-note">{{ deliberation.created_at|date:"M d, Y H:i" }}</span>
-                            </div>
-                            <div class="d-flex flex-wrap gap-2 mb-3">
-                                <span class="rg-pill rg-pill--info">{{ deliberation.deliberated_at|date:"M d, Y H:i" }}</span>
-                                {% if deliberation.ranking_position %}
-                                    <span class="rg-pill rg-pill--neutral">Rank {{ deliberation.ranking_position }}</span>
-                                {% endif %}
-                                <span class="rg-pill rg-pill--{% if deliberation.is_finalized %}success{% else %}neutral{% endif %}">{% if deliberation.is_finalized %}Finalized{% else %}Draft{% endif %}</span>
-                            </div>
-                            <p class="mb-1"><strong>Deliberation Minutes:</strong> {{ deliberation.deliberation_minutes }}</p>
-                            <p class="mb-1"><strong>Decision-Support Summary:</strong> {{ deliberation.decision_support_summary }}</p>
-                            <p class="mb-2"><strong>Ranking Notes:</strong> {{ deliberation.ranking_notes|default:"No ranking notes recorded." }}</p>
-                            <div class="rg-info-list mb-2">
-                                <div class="rg-info-row">
-                                    <div class="rg-info-row__label">Finalized Screening Sources</div>
-                                    <div class="rg-info-row__value">{{ deliberation.consolidated_snapshot.summary.finalized_screening_count|default:0 }}</div>
-                                </div>
-                                <div class="rg-info-row">
-                                    <div class="rg-info-row__label">Finalized Exam Sources</div>
-                                    <div class="rg-info-row__value">{{ deliberation.consolidated_snapshot.summary.finalized_exam_count|default:0 }}</div>
-                                </div>
-                                <div class="rg-info-row">
-                                    <div class="rg-info-row__label">Finalized Interview Sources</div>
-                                    <div class="rg-info-row__value">{{ deliberation.consolidated_snapshot.summary.finalized_interview_count|default:0 }}</div>
-                                </div>
-                                <div class="rg-info-row">
-                                    <div class="rg-info-row__label">Latest Interview Average</div>
-                                    <div class="rg-info-row__value">{{ deliberation.consolidated_snapshot.summary.latest_interview_average|default:"Not available" }}</div>
-                                </div>
-                            </div>
-                            <p class="mb-0 rg-note">
-                                {% if deliberation.is_finalized %}
-                                    Finalized by {{ deliberation.finalized_by_role|role_label }} on {{ deliberation.finalized_at|date:"M d, Y H:i" }}
-                                {% else %}
-                                    Draft deliberation output
-                                {% endif %}
-                            </p>
-                        </article>
-                    {% endfor %}
-                </div>
-            {% else %}
-                <div class="rg-empty-state mb-3">No deliberation or decision-support record has been saved yet.</div>
-            {% endif %}
-
-            {% if current_comparative_assessment_report %}
-                <div class="rg-form-section mt-4">
-                    <h3 class="rg-form-section__title">Comparative Assessment Report</h3>
-                    <article class="rg-record">
-                        <div class="rg-record__header">
-                            <div>
-                                <strong>{{ current_comparative_assessment_report.recruitment_entry.job_code }} CAR</strong>
-                                <div class="rg-record__meta">{{ current_comparative_assessment_report.generated_by_role|role_label }}{% if current_comparative_assessment_report.generated_by %} | {{ current_comparative_assessment_report.generated_by }}{% endif %}</div>
-                            </div>
-                            {% if current_comparative_assessment_report.evidence_item %}
-                                <a href="{% url 'evidence-download' application.pk current_comparative_assessment_report.evidence_item.pk %}" class="btn btn-outline-secondary btn-sm">Download PDF</a>
-                            {% endif %}
-                        </div>
-                        <div class="d-flex flex-wrap gap-2 mb-3">
-                            <span class="rg-pill rg-pill--neutral">Version {{ current_comparative_assessment_report.generation_count }}</span>
-                            <span class="rg-pill rg-pill--{% if current_comparative_assessment_report.is_finalized %}success{% else %}neutral{% endif %}">{% if current_comparative_assessment_report.is_finalized %}Finalized{% else %}Draft{% endif %}</span>
-                        </div>
-                        <p class="mb-2"><strong>CAR Notes:</strong> {{ current_comparative_assessment_report.summary_notes|default:"No CAR notes recorded." }}</p>
-                        {% if current_comparative_assessment_report_items %}
-                            <div class="rg-list-stack mb-2">
-                                {% for car_item in current_comparative_assessment_report_items %}
-                                    <article class="rg-record">
-                                        <div class="rg-record__header">
-                                            <div>
-                                                <strong>Rank {{ car_item.rank_order }}</strong>
-                                                <div class="rg-record__meta">{{ car_item.application.reference_number }} | {{ car_item.application.applicant_display_name }}</div>
-                                            </div>
-                                            <span class="rg-note">{{ car_item.created_at|date:"M d, Y H:i" }}</span>
-                                        </div>
-                                        <p class="mb-1"><strong>Qualification:</strong> {{ car_item.qualification_outcome|default:"Not available" }}</p>
-                                        <p class="mb-1"><strong>Exam:</strong> {{ car_item.exam_status|default:"Not available" }}{% if car_item.exam_score %} ({{ car_item.exam_score }}){% endif %}</p>
-                                        <p class="mb-1"><strong>Interview Average:</strong> {{ car_item.interview_average_score|default_if_none:"Not available" }}</p>
-                                        <p class="mb-0"><strong>Decision-Support Summary:</strong> {{ car_item.decision_support_summary|default:"No summary recorded." }}</p>
-                                    </article>
-                                {% endfor %}
-                            </div>
-                        {% else %}
-                            <div class="rg-empty-state mb-2">No CAR ranking rows have been generated yet.</div>
-                        {% endif %}
-                        <p class="mb-0 rg-note">
-                            {% if current_comparative_assessment_report.is_finalized %}
-                                Finalized by {{ current_comparative_assessment_report.finalized_by_role|role_label }} on {{ current_comparative_assessment_report.finalized_at|date:"M d, Y H:i" }}
-                            {% else %}
-                                Draft CAR output
-                            {% endif %}
-                        </p>
-                    </article>
-                </div>
-            {% elif application.branch == "plantilla" %}
-                <div class="rg-empty-state mt-4">No Comparative Assessment Report has been generated yet for this Plantilla case.</div>
-            {% endif %}
-        </div>
-
-        <div class="card p-4 mb-4 rg-detail-anchor" id="submission-packet">
-            <div class="rg-section__header">
-                <div>
-                    <h2 class="h4 mb-1">Submission Packet</h2>
-                    <p class="rg-section-copy">Structured decision-side packet assembled from finalized evaluation outputs, decision-support records, and evidence references.</p>
-                </div>
-                {% if submission_packet.summary.ready_for_final_decision %}
-                    <span class="rg-pill rg-pill--success">Ready for Final Decision</span>
-                {% else %}
-                    <span class="rg-pill rg-pill--warning">Packet Incomplete</span>
-                {% endif %}
+        {% elif interview_rating_requires_session %}
+            <div class="card p-4 mb-4">
+                <h2 class="h4 mb-2">Interview Rating Entry</h2>
+                <div class="rg-empty-state">Schedule the interview session for the current stage before encoding ratings.</div>
             </div>
-            {% if submission_packet %}
-                <div class="rg-info-list mb-3">
-                    <div class="rg-info-row">
-                        <div class="rg-info-row__label">Decision Context</div>
-                        <div class="rg-info-row__value">{{ submission_packet.context.current_stage_label|default:"No current stage" }}</div>
+        {% elif interview_rating_locked and current_interview_session %}
+            <div class="card p-4 mb-4">
+                <h2 class="h4 mb-2">Interview Rating Entry</h2>
+                <div class="rg-empty-state">Interview ratings for {{ current_interview_session.get_review_stage_display }} are locked because the session has already been finalized. 🔒</div>
+            </div>
+        {% endif %}
+
+        {% if interview_fallback_form %}
+            <div class="card p-4 mb-4">
+                <h2 class="h4 mb-2">Fallback Rating Upload</h2>
+                <p class="rg-note mb-3">Upload a scanned fallback rating sheet when direct encoding is not the primary record.</p>
+                <form method="post" action="{% url 'interview-fallback-upload' application.pk %}" enctype="multipart/form-data">
+                    {% csrf_token %}
+                    <div class="rg-form-grid">
+                        {% for field in interview_fallback_form %}
+                            {% include "recruitment/includes/form_field.html" with field=field %}
+                        {% endfor %}
                     </div>
-                    <div class="rg-info-row">
-                        <div class="rg-info-row__label">Case Status</div>
-                        <div class="rg-info-row__value">{{ submission_packet.context.case_status_label|default:"No case status" }}</div>
+                    <div class="rg-form-actions">
+                        <button type="submit" class="btn btn-outline-secondary">Upload Fallback Sheet</button>
                     </div>
-                    <div class="rg-info-row">
-                        <div class="rg-info-row__label">Evidence References</div>
-                        <div class="rg-info-row__value">{{ submission_packet.summary.evidence_reference_count }}</div>
-                    </div>
-                    <div class="rg-info-row">
-                        <div class="rg-info-row__label">Decision History</div>
-                        <div class="rg-info-row__value">{{ final_decision_history|length }} recorded decision{{ final_decision_history|length|pluralize }}</div>
-                    </div>
-                </div>
-                {% if submission_packet.summary.missing_components %}
-                    <div class="alert alert-warning">
-                        Final decision recording stays blocked until these packet components are available: {{ submission_packet.summary.missing_components|join:", " }}.
-                    </div>
-                {% endif %}
-                <div class="rg-form-section mb-3">
-                    <h3 class="rg-form-section__title">Decision-Support Outputs</h3>
-                    {% if submission_packet.deliberation_record.id %}
-                        <article class="rg-record mb-3">
-                            <div class="rg-record__header">
-                                <div>
-                                    <strong>{{ submission_packet.deliberation_record.review_stage_label }}</strong>
-                                    <div class="rg-record__meta">{{ submission_packet.deliberation_record.recorded_by_role|role_label }}{% if submission_packet.deliberation_record.recorded_by %} | {{ submission_packet.deliberation_record.recorded_by }}{% endif %}</div>
-                                </div>
-                                <span class="rg-pill rg-pill--success">Read-Only</span>
-                            </div>
-                            <p class="mb-1"><strong>Decision-Support Summary:</strong> {{ submission_packet.deliberation_record.decision_support_summary }}</p>
-                            <p class="mb-1"><strong>Ranking Position:</strong> {{ submission_packet.deliberation_record.ranking_position|default:"Not ranked" }}</p>
-                            <p class="mb-0 rg-note">
-                                Finalized screening: {{ submission_packet.deliberation_record.finalized_screening_count|default:0 }},
-                                exam: {{ submission_packet.deliberation_record.finalized_exam_count|default:0 }},
-                                interview: {{ submission_packet.deliberation_record.finalized_interview_count|default:0 }}
-                            </p>
-                        </article>
+                </form>
+            </div>
+        {% elif interview_fallback_requires_session %}
+            <div class="card p-4 mb-4">
+                <h2 class="h4 mb-2">Fallback Rating Upload</h2>
+                <div class="rg-empty-state">Schedule the interview session for the current stage before uploading a fallback rating sheet.</div>
+            </div>
+        {% elif interview_fallback_locked and current_interview_session %}
+            <div class="card p-4 mb-4">
+                <h2 class="h4 mb-2">Fallback Rating Upload</h2>
+                <div class="rg-empty-state">Fallback uploads for {{ current_interview_session.get_review_stage_display }} are locked because the interview session is finalized. 🔒</div>
+            </div>
+        {% endif %}
+        </div>
+
+        <!-- ── Deliberation / CAR Section ── -->
+        <div class="rg-stage-section" id="section-deliberation" style="display:none;">
+        {% if deliberation_form %}
+            <div class="card p-4 mb-4">
+                <h2 class="h4 mb-2">Deliberation Record</h2>
+                <p class="rg-note mb-3">
+                    {% if application.branch == "plantilla" %}
+                        Record the HRMPSB deliberation minutes, decision-support summary, and ranking position before generating the Comparative Assessment Report.
                     {% else %}
-                        <div class="rg-empty-state mb-3">No finalized deliberation record is available for the decision packet yet.</div>
+                        Record the HRM Chief deliberation minutes and decision-support summary before endorsing this COS case to the Appointing Authority.
                     {% endif %}
-                    {% if submission_packet.comparative_assessment_report.id %}
-                        <article class="rg-record">
-                            <div class="rg-record__header">
-                                <div>
-                                    <strong>{{ submission_packet.comparative_assessment_report.review_stage_label }} CAR</strong>
-                                    <div class="rg-record__meta">Version {{ submission_packet.comparative_assessment_report.generation_count }} | {{ submission_packet.comparative_assessment_report.generated_by_role|role_label }}</div>
-                                </div>
-                                <span class="rg-pill rg-pill--success">Read-Only</span>
-                            </div>
-                            <p class="mb-2"><strong>CAR Notes:</strong> {{ submission_packet.comparative_assessment_report.summary_notes|default:"No CAR notes recorded." }}</p>
-                            <p class="mb-0 rg-note">{{ submission_packet.comparative_assessment_report.candidate_count|default:0 }} ranked candidate{{ submission_packet.comparative_assessment_report.candidate_count|default:0|pluralize }} preserved in the packet snapshot.</p>
-                        </article>
-                    {% elif application.branch == "plantilla" %}
-                        <div class="rg-empty-state">No finalized Comparative Assessment Report is available for the decision packet yet.</div>
-                    {% endif %}
+                </p>
+                <form method="post" action="{% url 'deliberation-record' application.pk %}">
+                    {% csrf_token %}
+                    <div class="rg-form-grid">
+                        {% for field in deliberation_form %}
+                            {% include "recruitment/includes/form_field.html" with field=field %}
+                        {% endfor %}
+                    </div>
+                    <div class="rg-form-actions">
+                        <button type="submit" name="operation" value="save" class="btn btn-outline-secondary">Save Deliberation</button>
+                        <button type="submit" name="operation" value="finalize" class="btn btn-rg-primary">Finalize Deliberation</button>
+                    </div>
+                </form>
+            </div>
+        {% elif deliberation_locked and current_deliberation_record %}
+            <div class="card p-4 mb-4">
+                <h2 class="h4 mb-2">Deliberation Record</h2>
+                <div class="rg-empty-state">The deliberation record for {{ current_deliberation_record.get_review_stage_display }} is finalized and locked. 🔒</div>
+            </div>
+        {% endif %}
+
+        {% if car_form %}
+            <div class="card p-4 mb-4">
+                <h2 class="h4 mb-2">Comparative Assessment Report</h2>
+                <p class="rg-note mb-3">Generate the Plantilla CAR from finalized deliberation records and lock it before recommendation.</p>
+                <form method="post" action="{% url 'comparative-assessment-report' application.pk %}">
+                    {% csrf_token %}
+                    <div class="rg-form-grid">
+                        {% for field in car_form %}
+                            {% include "recruitment/includes/form_field.html" with field=field %}
+                        {% endfor %}
+                    </div>
+                    <div class="rg-form-actions">
+                        <button type="submit" name="operation" value="save" class="btn btn-outline-secondary">Generate CAR</button>
+                        <button type="submit" name="operation" value="finalize" class="btn btn-rg-primary">Finalize CAR</button>
+                    </div>
+                </form>
+            </div>
+        {% elif car_requires_deliberation %}
+            <div class="card p-4 mb-4">
+                <h2 class="h4 mb-2">Comparative Assessment Report</h2>
+                <div class="rg-empty-state">Save the deliberation record for this Plantilla case before generating the Comparative Assessment Report.</div>
+            </div>
+        {% elif car_requires_finalized_deliberation %}
+            <div class="card p-4 mb-4">
+                <h2 class="h4 mb-2">Comparative Assessment Report</h2>
+                <div class="rg-empty-state">Finalize the deliberation record before generating the Comparative Assessment Report.</div>
+            </div>
+        {% elif car_locked and current_comparative_assessment_report %}
+            <div class="card p-4 mb-4">
+                <h2 class="h4 mb-2">Comparative Assessment Report</h2>
+                <div class="rg-empty-state">The Comparative Assessment Report for {{ current_comparative_assessment_report.get_review_stage_display }} is finalized and locked. 🔒</div>
+            </div>
+        {% endif %}
+        </div>
+
+        <!-- ── Decision Section ── -->
+        <div class="rg-stage-section" id="section-decision" style="display:none;">
+        {% if final_decision_form %}
+            <div class="card p-4 mb-4">
+                <h2 class="h4 mb-2">Final Decision Recording</h2>
+                <p class="rg-note mb-3">Review the submission packet above, then record the final selected or not selected outcome.</p>
+                <form method="post" action="{% url 'final-decision-record' application.pk %}">
+                    {% csrf_token %}
+                    <div class="rg-form-grid">
+                        {% for field in final_decision_form %}
+                            {% include "recruitment/includes/form_field.html" with field=field %}
+                        {% endfor %}
+                    </div>
+                    <div class="rg-form-actions">
+                        <button type="submit" class="btn btn-rg-primary">Record Final Decision</button>
+                    </div>
+                </form>
+            </div>
+        {% elif latest_final_decision %}
+            <div class="card p-4 mb-4">
+                <h2 class="h4 mb-2">Final Decision Recording</h2>
+                <div class="rg-empty-state">
+                    Final decision already recorded as {{ latest_final_decision.get_decision_outcome_display }} on
+                    {{ latest_final_decision.decided_at|date:"M d, Y H:i" }}.
+                    Submission-packet artifacts remain preserved as read-only. 🔒
                 </div>
-                <div class="rg-form-section">
-                    <h3 class="rg-form-section__title">Evidence References</h3>
-                    {% if submission_packet.evidence_references %}
+            </div>
+        {% endif %}
+        </div>
+
+        <!-- ── Completion Section ── -->
+        <div class="rg-stage-section" id="section-completion" style="display:none;">
+        {% if completion_form %}
+            <div class="card p-4 mb-4">
+                <h2 class="h4 mb-2">Completion Management</h2>
+                <p class="rg-note mb-3">
+                    {% if application.branch == "plantilla" %}
+                        Record appointment-related completion details, checklist status, and announcement data.
+                    {% else %}
+                        Record contract-related completion details and checklist status.
+                    {% endif %}
+                </p>
+                <form method="post" action="{% url 'completion-tracking' application.pk %}">
+                    {% csrf_token %}
+                    <div class="rg-form-grid">
+                        {% for field in completion_form %}
+                            {% include "recruitment/includes/form_field.html" with field=field %}
+                        {% endfor %}
+                    </div>
+                    <div class="rg-form-section mt-4">
+                        <h3 class="rg-form-section__title">Requirement Checklist</h3>
+                        {{ completion_requirement_formset.management_form }}
+                        {% if completion_requirement_formset.non_form_errors %}
+                            <div class="alert alert-danger">{{ completion_requirement_formset.non_form_errors|join:", " }}</div>
+                        {% endif %}
                         <div class="rg-list-stack">
-                            {% for evidence_reference in submission_packet.evidence_references %}
+                            {% for requirement_form in completion_requirement_formset %}
                                 <article class="rg-record">
-                                    <div class="rg-record__header">
-                                        <div>
-                                            <strong>{{ evidence_reference.label }}</strong>
-                                            <div class="rg-record__meta">
-                                                {% if evidence_reference.workflow_stage_label %}
-                                                    {{ evidence_reference.workflow_stage_label }} |
-                                                {% endif %}
-                                                {{ evidence_reference.original_filename }}
-                                            </div>
-                                        </div>
-                                        <a href="{% url 'evidence-download' application.pk evidence_reference.id %}" class="btn btn-outline-secondary btn-sm">Download</a>
+                                    {% for hidden in requirement_form.hidden_fields %}
+                                        {{ hidden }}
+                                    {% endfor %}
+                                    <div class="rg-form-grid">
+                                        {% for field in requirement_form.visible_fields %}
+                                            {% if field.name != "DELETE" %}
+                                                {% include "recruitment/includes/form_field.html" with field=field %}
+                                            {% endif %}
+                                        {% endfor %}
                                     </div>
-                                    <code>{{ evidence_reference.sha256_digest }}</code>
+                                    <div class="form-check mt-3">
+                                        {{ requirement_form.DELETE }}
+                                        <label for="{{ requirement_form.DELETE.id_for_label }}" class="form-check-label">
+                                            Remove this requirement
+                                        </label>
+                                    </div>
                                 </article>
                             {% endfor %}
                         </div>
+                    </div>
+                    <div class="rg-form-actions">
+                        <button type="submit" class="btn btn-rg-primary">Save Completion Tracking</button>
+                    </div>
+                </form>
+            </div>
+        {% endif %}
+
+        {% if closure_form %}
+            <div class="card p-4 mb-4">
+                <h2 class="h4 mb-2">Case Closure</h2>
+                <p class="rg-note mb-3">Close the recruitment case only after all tracked completion requirements are resolved.</p>
+                <form method="post" action="{% url 'case-close' application.pk %}">
+                    {% csrf_token %}
+                    <div class="rg-form-grid">
+                        {% for field in closure_form %}
+                            {% include "recruitment/includes/form_field.html" with field=field %}
+                        {% endfor %}
+                    </div>
+                    <div class="rg-form-actions">
+                        <button type="submit" class="btn btn-outline-danger">Close Recruitment Case</button>
+                    </div>
+                </form>
+            </div>
+        {% endif %}
+        </div>
+
+        <!-- ── Workflow Actions Section ── -->
+        <div class="rg-stage-section" id="section-workflow-action" style="display:none;">
+        {% if action_form %}
+            <div class="card p-4 mb-4">
+                <h2 class="h4 mb-2">Workflow Action</h2>
+                <p class="rg-note mb-3">
+                    {% if recruitment_case and recruitment_case.current_stage == "appointing_authority_review" %}
+                        Use this control only for allowed non-final workflow actions such as returning the packet to HRM Chief.
                     {% else %}
-                        <div class="rg-empty-state">No evidence references are available yet for this submission packet.</div>
+                        Record the next authorized workflow decision for the current stage.
                     {% endif %}
-                </div>
-            {% else %}
-                <div class="rg-empty-state">A recruitment case must exist before the decision submission packet can be assembled.</div>
-            {% endif %}
-        </div>
-
-        <div class="card p-4 mb-4 rg-detail-anchor" id="decision-history">
-            <div class="rg-section__header">
-                <div>
-                    <h2 class="h4 mb-1">Decision History</h2>
-                    <p class="rg-section-copy">Final decision records preserve the selected or not selected outcome together with the packet snapshot that supported the decision.</p>
-                </div>
-                <span class="rg-pill rg-pill--neutral">{{ final_decision_history|length }} decision{{ final_decision_history|length|pluralize }}</span>
+                </p>
+                <form method="post" action="{% url 'workflow-action' application.pk %}">
+                    {% csrf_token %}
+                    <div class="rg-form-grid">
+                        {% for field in action_form %}
+                            {% include "recruitment/includes/form_field.html" with field=field %}
+                        {% endfor %}
+                    </div>
+                    <div class="rg-form-actions">
+                        <button type="submit" class="btn btn-rg-primary">Record Decision</button>
+                    </div>
+                </form>
             </div>
-            {% if final_decision_history %}
-                <div class="rg-list-stack">
-                    {% for decision in final_decision_history %}
-                        <article class="rg-record">
-                            <div class="rg-record__header">
-                                <div>
-                                    <strong>{{ decision.decided_by_role|role_label }}</strong>
-                                    <div class="rg-record__meta">{% if decision.decided_by %}{{ decision.decided_by }}{% endif %}</div>
-                                </div>
-                                <span class="rg-note">{{ decision.decided_at|date:"M d, Y H:i" }}</span>
-                            </div>
-                            <div class="d-flex flex-wrap gap-2 mb-3">
-                                <span class="rg-pill rg-pill--{{ decision.decision_outcome|status_theme }}">{{ decision.get_decision_outcome_display }}</span>
-                                <span class="rg-pill rg-pill--neutral">{{ decision.review_stage|stage_label }}</span>
-                            </div>
-                            <p class="mb-2"><strong>Decision Notes:</strong> {{ decision.decision_notes }}</p>
-                            <p class="mb-0 rg-note">
-                                Preserved packet snapshot:
-                                {{ decision.submission_packet_snapshot.summary.finalized_screening_count|default:0 }} screening,
-                                {{ decision.submission_packet_snapshot.summary.finalized_exam_count|default:0 }} exam,
-                                {{ decision.submission_packet_snapshot.summary.finalized_interview_count|default:0 }} interview,
-                                {{ decision.submission_packet_snapshot.summary.evidence_reference_count|default:0 }} evidence reference{{ decision.submission_packet_snapshot.summary.evidence_reference_count|default:0|pluralize }}.
-                            </p>
-                        </article>
-                    {% endfor %}
-                </div>
-            {% else %}
-                <div class="rg-empty-state">No final decision has been recorded yet.</div>
-            {% endif %}
-        </div>
+        {% endif %}
 
-        <div class="card p-4 mb-4 rg-detail-anchor" id="audit-logs">
-            <div class="rg-section__header">
-                <div>
-                    <h2 class="h4 mb-1">Routing History</h2>
-                    <p class="rg-section-copy">Recorded routing actions, forwarded stages, and controlled override events.</p>
-                </div>
-                <span class="rg-pill rg-pill--neutral">{{ routing_history|length }} route{{ routing_history|length|pluralize }}</span>
+        {% if checklist_notification_form %}
+            <div class="card p-4 mb-4">
+                <h2 class="h4 mb-2">Requirement Checklist Notification</h2>
+                <p class="rg-note mb-3">Send the selected applicant the next-step requirement checklist and any deadline for completion handling.</p>
+                <form method="post" action="{% url 'notification-checklist' application.pk %}">
+                    {% csrf_token %}
+                    <div class="rg-form-grid">
+                        {% for field in checklist_notification_form %}
+                            {% include "recruitment/includes/form_field.html" with field=field %}
+                        {% endfor %}
+                    </div>
+                    <div class="rg-form-actions">
+                        <button type="submit" class="btn btn-rg-primary">Send Checklist Notification</button>
+                    </div>
+                </form>
             </div>
-            {% if routing_history %}
-                <div class="rg-list-stack">
-                    {% for route in routing_history %}
-                        <article class="rg-record">
-                            <div class="rg-record__header">
-                                <strong>{{ route.get_route_type_display }}</strong>
-                                <span class="rg-note">{{ route.created_at|date:"M d, Y H:i" }}</span>
-                            </div>
-                            <p class="mb-2">{{ route.description }}</p>
-                            <div class="d-flex flex-wrap gap-2 mb-2">
-                                <span class="rg-pill rg-pill--{{ route.branch|branch_theme }}">{{ route.get_branch_display }}</span>
-                                <span class="rg-pill rg-pill--{{ route.level|level_theme }}">{{ route.get_level_display }}</span>
-                                {% if route.is_override %}
-                                    <span class="rg-pill rg-pill--warning">Controlled Override</span>
-                                {% endif %}
-                            </div>
-                            <p class="mb-1"><strong>Handler:</strong> {{ route.from_handler_role|role_label|default:"Start" }} -> {% if route.to_handler_role %}{{ route.to_handler_role|role_label }}{% else %}Closed{% endif %}</p>
-                            {% if route.from_stage or route.to_stage %}
-                                <p class="mb-1"><strong>Stage:</strong> {% if route.from_stage %}{{ route.from_stage|stage_label }}{% else %}Start{% endif %} -> {% if route.to_stage %}{{ route.to_stage|stage_label }}{% else %}No stage{% endif %}</p>
-                            {% endif %}
-                            {% if route.notes %}
-                                <p class="mb-0 rg-note">{{ route.notes }}</p>
-                            {% endif %}
-                        </article>
-                    {% endfor %}
-                </div>
-            {% else %}
-                <div class="rg-empty-state">No routing events recorded yet.</div>
-            {% endif %}
-        </div>
+        {% endif %}
 
-        <div class="card p-4 mb-4 rg-detail-anchor" id="evidence-vault-records">
-            <div class="rg-section__header">
-                <div>
-                    <h2 class="h4 mb-1">Evidence Vault</h2>
-                    <p class="rg-section-copy">Controlled evidence items stored with digest metadata for integrity verification.</p>
-                </div>
-                <span class="rg-pill rg-pill--neutral">{{ application.evidence_items.count }} file{{ application.evidence_items.count|pluralize }}</span>
+        {% if reminder_notification_form %}
+            <div class="card p-4 mb-4">
+                <h2 class="h4 mb-2">Reminder Notification</h2>
+                <p class="rg-note mb-3">Send a status or deadline reminder where the current application state still requires applicant action.</p>
+                <form method="post" action="{% url 'notification-reminder' application.pk %}">
+                    {% csrf_token %}
+                    <div class="rg-form-grid">
+                        {% for field in reminder_notification_form %}
+                            {% include "recruitment/includes/form_field.html" with field=field %}
+                        {% endfor %}
+                    </div>
+                    <div class="rg-form-actions">
+                        <button type="submit" class="btn btn-outline-dark">Send Reminder</button>
+                    </div>
+                </form>
             </div>
-            {% if application.evidence_items.all %}
-                <div class="rg-list-stack">
-                    {% for evidence in application.evidence_items.all %}
-                        <article class="rg-record">
-                            <div class="rg-record__header">
-                                <div>
-                                    <strong>{{ evidence.label }}</strong>
-                                    {% if evidence.document_type %}
-                                        <div class="rg-record__meta">{{ evidence.get_document_type_display }}</div>
-                                    {% endif %}
-                                    {% if evidence.workflow_stage %}
-                                        <div class="rg-record__meta">{{ evidence.workflow_stage|stage_label }}</div>
-                                    {% endif %}
-                                    <div class="rg-record__meta">{{ evidence.original_filename }} | {{ evidence.size_bytes }} bytes</div>
-                                </div>
-                                <a href="{% url 'evidence-download' application.pk evidence.pk %}" class="btn btn-outline-secondary btn-sm">Download</a>
-                            </div>
-                            <code>{{ evidence.sha256_digest }}</code>
-                        </article>
-                    {% endfor %}
-                </div>
-            {% else %}
-                <div class="rg-empty-state">No evidence uploaded yet.</div>
-            {% endif %}
+        {% endif %}
+
+        {% if override_form %}
+            <div class="card p-4 mb-4">
+                <h2 class="h4 mb-2">Level 2 Override</h2>
+                <p class="rg-note mb-3">Use only when Secretariat must explicitly process a Level 2 case with audit logging.</p>
+                <form method="post" action="{% url 'workflow-override' application.pk %}">
+                    {% csrf_token %}
+                    <div class="rg-form-grid">
+                        {% for field in override_form %}
+                            {% include "recruitment/includes/form_field.html" with field=field %}
+                        {% endfor %}
+                    </div>
+                    <div class="rg-form-actions">
+                        <button type="submit" class="btn btn-outline-danger">Grant Controlled Override</button>
+                    </div>
+                </form>
+            </div>
+        {% endif %}
+
+        {% if reopen_form %}
+            <div class="card p-4">
+                <h2 class="h4 mb-2">Controlled Reopen</h2>
+                <p class="rg-note mb-3">Use only for stage-locked cases that need to be reopened with traceable justification.</p>
+                <form method="post" action="{% url 'workflow-reopen' application.pk %}">
+                    {% csrf_token %}
+                    <div class="rg-form-grid">
+                        {% for field in reopen_form %}
+                            {% include "recruitment/includes/form_field.html" with field=field %}
+                        {% endfor %}
+                    </div>
+                    <div class="rg-form-actions">
+                        <button type="submit" class="btn btn-outline-danger">Reopen Case</button>
+                    </div>
+                </form>
+            </div>
+        {% endif %}
         </div>
 
-        <div class="card p-4">
-            <h2 class="h4 mb-3">Case Timeline</h2>
-            {% if case_timeline %}
-                <div class="rg-timeline">
-                    {% for entry in case_timeline %}
-                        <article class="rg-timeline__item">
-                            <div class="rg-record">
+        <!-- ── Evidence Section ── -->
+        <div id="evidence-section">
+            <div class="card p-4 mb-4">
+                <div class="rg-section__header mb-3">
+                    <div>
+                        <h2 class="h4 mb-1">Evidence Vault</h2>
+                        <p class="rg-section-copy">Encrypted controlled documents stored for this case.</p>
+                    </div>
+                </div>
+                {% if evidence_items %}
+                    <div class="rg-list-stack">
+                        {% for item in evidence_items %}
+                            <article class="rg-record">
                                 <div class="rg-record__header">
-                                    <strong>{{ entry.get_action_display }}</strong>
-                                    <span class="rg-note">{{ entry.created_at|date:"M d, Y H:i" }}</span>
+                                    <div>
+                                        <strong>{{ item.label }}</strong>
+                                        <div class="rg-record__meta">{{ item.original_filename }} — v{{ item.version }}</div>
+                                    </div>
+                                    <span class="rg-note">{{ item.uploaded_at|date:"M d, Y H:i" }}</span>
                                 </div>
-                                <p class="mb-1">{{ entry.description }}</p>
-                                {% if entry.metadata.from_stage or entry.metadata.to_stage %}
-                                    <p class="mb-1 rg-note">
-                                        {% if entry.metadata.from_stage %}{{ entry.metadata.from_stage|stage_label }}{% else %}Start{% endif %}
-                                        ->
-                                        {% if entry.metadata.to_stage %}{{ entry.metadata.to_stage|stage_label }}{% elif entry.metadata.case_stage %}{{ entry.metadata.case_stage|stage_label }}{% else %}No stage{% endif %}
-                                    </p>
+                                <div class="d-flex flex-wrap gap-2 mb-2">
+                                    <span class="rg-pill rg-pill--neutral">SHA-256: {{ item.sha256_hash|truncatechars:18 }}</span>
+                                    {% if item.evidence_stage %}
+                                        <span class="rg-pill rg-pill--info">{{ item.evidence_stage|stage_label }}</span>
+                                    {% endif %}
+                                </div>
+                                {% if item.can_download %}
+                                    <div class="d-flex gap-2">
+                                        <a href="{% url 'evidence-download' item.pk %}" class="btn btn-outline-secondary btn-sm">Download</a>
+                                        {% if item.can_upload_new_version %}
+                                            <form method="post" action="{% url 'evidence-new-version' item.pk %}" enctype="multipart/form-data" class="d-flex gap-2 align-items-center">
+                                                {% csrf_token %}
+                                                <input type="file" name="file" class="form-control form-control-sm" style="max-width:200px;" required>
+                                                <button type="submit" class="btn btn-outline-dark btn-sm">Upload v{{ item.version|add:1 }}</button>
+                                            </form>
+                                        {% endif %}
+                                    </div>
                                 {% endif %}
-                                <p class="mb-0 rg-note">{{ entry.actor_role|role_label|default:"System" }}</p>
-                            </div>
-                        </article>
-                    {% endfor %}
+                            </article>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="rg-empty-state">No evidence uploaded yet.</div>
+                {% endif %}
+            </div>
+
+            {% if evidence_form %}
+                <div class="card p-4 mb-4">
+                    <h2 class="h4 mb-2">Upload Evidence</h2>
+                    <p class="rg-note mb-3">Store additional controlled documents in the encrypted Evidence Vault.</p>
+                    <form method="post" action="{% url 'evidence-upload' application.pk %}" enctype="multipart/form-data">
+                        {% csrf_token %}
+                        <div class="rg-form-grid">
+                            {% for field in evidence_form %}
+                                {% include "recruitment/includes/form_field.html" with field=field %}
+                            {% endfor %}
+                        </div>
+                        <div class="rg-form-actions">
+                            <button type="submit" class="btn btn-rg-primary">Store Securely</button>
+                        </div>
+                    </form>
                 </div>
-            {% else %}
-                <div class="rg-empty-state">No case events recorded yet.</div>
             {% endif %}
+        </div>
+
+        <!-- ── Timeline Section ── -->
+        <div id="timeline-section">
+            <div class="card p-4">
+                <div class="rg-section__header mb-3">
+                    <div>
+                        <h2 class="h4 mb-1">Case Timeline</h2>
+                        <p class="rg-section-copy">Workflow-facing milestones for this recruitment case.</p>
+                    </div>
+                    <a href="{{ audit_log_url }}" class="btn btn-outline-secondary btn-sm">Full Audit Trail</a>
+                </div>
+                {% if case_timeline %}
+                    <div class="rg-timeline">
+                        {% for entry in case_timeline %}
+                            <article class="rg-timeline__item">
+                                <div class="rg-record">
+                                    <div class="rg-record__header">
+                                        <strong>{{ entry.get_action_display }}</strong>
+                                        <span class="rg-note">{{ entry.created_at|date:"M d, Y H:i" }}</span>
+                                    </div>
+                                    <p class="mb-1">{{ entry.description }}</p>
+                                    {% if entry.metadata.from_stage or entry.metadata.to_stage %}
+                                        <p class="mb-1 rg-note">
+                                            {% if entry.metadata.from_stage %}{{ entry.metadata.from_stage|stage_label }}{% else %}Start{% endif %}
+                                            ->
+                                            {% if entry.metadata.to_stage %}{{ entry.metadata.to_stage|stage_label }}{% elif entry.metadata.case_stage %}{{ entry.metadata.case_stage|stage_label }}{% else %}No stage{% endif %}
+                                        </p>
+                                    {% endif %}
+                                    <p class="mb-0 rg-note">{{ entry.actor_role|role_label|default:"System" }}</p>
+                                </div>
+                            </article>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="rg-empty-state">No case events recorded yet.</div>
+                {% endif %}
+            </div>
         </div>
     </div>
 
+    <!-- ── Side Status Panel (Right) ── -->
     <div class="col-xl-5">
         <div class="card p-4 mb-4 rg-detail-anchor" id="decision-controls">
             <p class="rg-eyebrow">Workflow Snapshot</p>
@@ -717,327 +680,65 @@
                 <div class="alert alert-info mt-4 mb-0">
                     Latest final decision: <strong>{{ latest_final_decision.get_decision_outcome_display }}</strong>
                     recorded on {{ latest_final_decision.decided_at|date:"M d, Y H:i" }}.
-                    The pre-decision packet snapshot remains preserved as read-only.
                 </div>
             {% endif %}
-            <div class="rg-list-stack mt-4">
-                <div class="rg-admin-note">
-                    <strong>Workflow decisions / approval</strong>
-                    <p>Use the workflow action controls in this case to record routing decisions, endorsements, and returns under the implemented server-side rules. Final selected or not selected outcomes are recorded separately through the decision form.</p>
-                </div>
-                <div class="rg-admin-note">
-                    <strong>Interview / ratings and deliberation support</strong>
-                    <p>Interview scheduling, evaluator ratings, deliberation minutes, ranking support, and finalized lock behavior are all handled directly inside this protected case page.</p>
-                </div>
-                <div class="rg-admin-note">
-                    <strong>Evidence export and audit traceability</strong>
-                    <p>Controlled export, routing history, and timeline records stay tied to this protected case view so evidence and approval actions remain accountable and reviewable.</p>
-                </div>
-            </div>
         </div>
 
-        {% if screening_form %}
-            <div class="card p-4 mb-4">
-                <h2 class="h4 mb-2">Qualification Screening</h2>
-                <p class="rg-note mb-3">Record completeness findings, qualification outcome, and screening notes before endorsing the case.</p>
-                <form method="post" action="{% url 'screening-review' application.pk %}">
-                    {% csrf_token %}
-                    <div class="rg-form-grid">
-                        {% for field in screening_form %}
-                            {% include "recruitment/includes/form_field.html" with field=field %}
-                        {% endfor %}
-                    </div>
-                    <div class="rg-form-actions">
-                        <button type="submit" name="operation" value="save" class="btn btn-outline-secondary">Save Screening</button>
-                        <button type="submit" name="operation" value="finalize" class="btn btn-rg-primary">Finalize Screening</button>
-                    </div>
-                </form>
-            </div>
-        {% elif screening_locked and current_screening_record %}
-            <div class="card p-4 mb-4">
-                <h2 class="h4 mb-2">Qualification Screening</h2>
-                <div class="rg-empty-state">The screening output for {{ current_screening_record.get_review_stage_display }} is finalized and locked.</div>
-            </div>
-        {% endif %}
-
-        {% if exam_form %}
-            <div class="card p-4 mb-4">
-                <h2 class="h4 mb-2">Examination Management</h2>
-                <p class="rg-note mb-3">
-                    {% if application.branch == "plantilla" %}
-                        Record exam type, result, score, validity period, or a justified waiver or absence for this Plantilla case.
-                    {% else %}
-                        Record the COS examination decision only when the office applies one. Waiver or absence may be finalized with remarks.
-                    {% endif %}
-                </p>
-                <form method="post" action="{% url 'exam-review' application.pk %}">
-                    {% csrf_token %}
-                    <div class="rg-form-grid">
-                        {% for field in exam_form %}
-                            {% include "recruitment/includes/form_field.html" with field=field %}
-                        {% endfor %}
-                    </div>
-                    <div class="rg-form-actions">
-                        <button type="submit" name="operation" value="save" class="btn btn-outline-secondary">Save Exam</button>
-                        <button type="submit" name="operation" value="finalize" class="btn btn-rg-primary">Finalize Exam</button>
-                    </div>
-                </form>
-            </div>
-        {% elif exam_locked and current_exam_record %}
-            <div class="card p-4 mb-4">
-                <h2 class="h4 mb-2">Examination Management</h2>
-                <div class="rg-empty-state">The examination output for {{ current_exam_record.get_review_stage_display }} is finalized and locked.</div>
-            </div>
-        {% endif %}
-
-        {% if interview_session_form %}
-            <div class="card p-4 mb-4">
-                <h2 class="h4 mb-2">Interview Scheduling</h2>
-                <p class="rg-note mb-3">Schedule the interview for the current stage, then finalize the session only after the rating output or fallback sheet is complete.</p>
-                <form method="post" action="{% url 'interview-session' application.pk %}">
-                    {% csrf_token %}
-                    <div class="rg-form-grid">
-                        {% for field in interview_session_form %}
-                            {% include "recruitment/includes/form_field.html" with field=field %}
-                        {% endfor %}
-                    </div>
-                    <div class="rg-form-actions">
-                        <button type="submit" name="operation" value="save" class="btn btn-outline-secondary">Save Interview Session</button>
-                        <button type="submit" name="operation" value="finalize" class="btn btn-rg-primary">Finalize Interview Session</button>
-                    </div>
-                </form>
-            </div>
-        {% elif interview_session_locked and current_interview_session %}
-            <div class="card p-4 mb-4">
-                <h2 class="h4 mb-2">Interview Scheduling</h2>
-                <div class="rg-empty-state">The interview session for {{ current_interview_session.get_review_stage_display }} is finalized and locked.</div>
-            </div>
-        {% endif %}
-
-        {% if interview_rating_form %}
-            <div class="card p-4 mb-4">
-                <h2 class="h4 mb-2">Interview Rating Entry</h2>
-                <p class="rg-note mb-3">Record the direct interview rating for the current evaluator role. Justification is required when the score falls below the passing threshold.</p>
-                <form method="post" action="{% url 'interview-rating' application.pk %}">
-                    {% csrf_token %}
-                    <div class="rg-form-grid">
-                        {% for field in interview_rating_form %}
-                            {% include "recruitment/includes/form_field.html" with field=field %}
-                        {% endfor %}
-                    </div>
-                    <div class="rg-form-actions">
-                        <button type="submit" class="btn btn-rg-primary">Save Interview Rating</button>
-                    </div>
-                </form>
-            </div>
-        {% elif interview_rating_requires_session %}
-            <div class="card p-4 mb-4">
-                <h2 class="h4 mb-2">Interview Rating Entry</h2>
-                <div class="rg-empty-state">Schedule the interview session for the current stage before encoding ratings.</div>
-            </div>
-        {% elif interview_rating_locked and current_interview_session %}
-            <div class="card p-4 mb-4">
-                <h2 class="h4 mb-2">Interview Rating Entry</h2>
-                <div class="rg-empty-state">Interview ratings for {{ current_interview_session.get_review_stage_display }} are locked because the session has already been finalized.</div>
-            </div>
-        {% endif %}
-
-        {% if interview_fallback_form %}
-            <div class="card p-4 mb-4">
-                <h2 class="h4 mb-2">Fallback Rating Upload</h2>
-                <p class="rg-note mb-3">Upload a scanned fallback rating sheet when direct encoding is not the primary record for the current interview stage.</p>
-                <form method="post" action="{% url 'interview-fallback-upload' application.pk %}" enctype="multipart/form-data">
-                    {% csrf_token %}
-                    <div class="rg-form-grid">
-                        {% for field in interview_fallback_form %}
-                            {% include "recruitment/includes/form_field.html" with field=field %}
-                        {% endfor %}
-                    </div>
-                    <div class="rg-form-actions">
-                        <button type="submit" class="btn btn-outline-secondary">Upload Fallback Sheet</button>
-                    </div>
-                </form>
-            </div>
-        {% elif interview_fallback_requires_session %}
-            <div class="card p-4 mb-4">
-                <h2 class="h4 mb-2">Fallback Rating Upload</h2>
-                <div class="rg-empty-state">Schedule the interview session for the current stage before uploading a fallback rating sheet.</div>
-            </div>
-        {% elif interview_fallback_locked and current_interview_session %}
-            <div class="card p-4 mb-4">
-                <h2 class="h4 mb-2">Fallback Rating Upload</h2>
-                <div class="rg-empty-state">Fallback uploads for {{ current_interview_session.get_review_stage_display }} are locked because the interview session is finalized.</div>
-            </div>
-        {% endif %}
-
-        {% if deliberation_form %}
-            <div class="card p-4 mb-4">
-                <h2 class="h4 mb-2">Deliberation Record</h2>
-                <p class="rg-note mb-3">
-                    {% if application.branch == "plantilla" %}
-                        Record the HRMPSB deliberation minutes, decision-support summary, and ranking position before generating the Comparative Assessment Report.
-                    {% else %}
-                        Record the HRM Chief deliberation minutes and decision-support summary before endorsing this COS case to the Appointing Authority.
-                    {% endif %}
-                </p>
-                <form method="post" action="{% url 'deliberation-record' application.pk %}">
-                    {% csrf_token %}
-                    <div class="rg-form-grid">
-                        {% for field in deliberation_form %}
-                            {% include "recruitment/includes/form_field.html" with field=field %}
-                        {% endfor %}
-                    </div>
-                    <div class="rg-form-actions">
-                        <button type="submit" name="operation" value="save" class="btn btn-outline-secondary">Save Deliberation</button>
-                        <button type="submit" name="operation" value="finalize" class="btn btn-rg-primary">Finalize Deliberation</button>
-                    </div>
-                </form>
-            </div>
-        {% elif deliberation_locked and current_deliberation_record %}
-            <div class="card p-4 mb-4">
-                <h2 class="h4 mb-2">Deliberation Record</h2>
-                <div class="rg-empty-state">The deliberation record for {{ current_deliberation_record.get_review_stage_display }} is finalized and locked.</div>
-            </div>
-        {% endif %}
-
-        {% if car_form %}
-            <div class="card p-4 mb-4">
-                <h2 class="h4 mb-2">Comparative Assessment Report</h2>
-                <p class="rg-note mb-3">Generate the Plantilla Comparative Assessment Report from finalized deliberation records for the same recruitment entry and lock it before recommendation.</p>
-                <form method="post" action="{% url 'comparative-assessment-report' application.pk %}">
-                    {% csrf_token %}
-                    <div class="rg-form-grid">
-                        {% for field in car_form %}
-                            {% include "recruitment/includes/form_field.html" with field=field %}
-                        {% endfor %}
-                    </div>
-                    <div class="rg-form-actions">
-                        <button type="submit" name="operation" value="save" class="btn btn-outline-secondary">Generate CAR</button>
-                        <button type="submit" name="operation" value="finalize" class="btn btn-rg-primary">Finalize CAR</button>
-                    </div>
-                </form>
-            </div>
-        {% elif car_requires_deliberation %}
-            <div class="card p-4 mb-4">
-                <h2 class="h4 mb-2">Comparative Assessment Report</h2>
-                <div class="rg-empty-state">Save the deliberation record for this Plantilla case before generating the Comparative Assessment Report.</div>
-            </div>
-        {% elif car_requires_finalized_deliberation %}
-            <div class="card p-4 mb-4">
-                <h2 class="h4 mb-2">Comparative Assessment Report</h2>
-                <div class="rg-empty-state">Finalize the deliberation record before generating the Comparative Assessment Report.</div>
-            </div>
-        {% elif car_locked and current_comparative_assessment_report %}
-            <div class="card p-4 mb-4">
-                <h2 class="h4 mb-2">Comparative Assessment Report</h2>
-                <div class="rg-empty-state">The Comparative Assessment Report for {{ current_comparative_assessment_report.get_review_stage_display }} is finalized and locked.</div>
-            </div>
-        {% endif %}
-
-        {% if final_decision_form %}
-            <div class="card p-4 mb-4">
-                <h2 class="h4 mb-2">Final Decision Recording</h2>
-                <p class="rg-note mb-3">Review the submission packet above, then record the final selected or not selected outcome for this recruitment case.</p>
-                <form method="post" action="{% url 'final-decision-record' application.pk %}">
-                    {% csrf_token %}
-                    <div class="rg-form-grid">
-                        {% for field in final_decision_form %}
-                            {% include "recruitment/includes/form_field.html" with field=field %}
-                        {% endfor %}
-                    </div>
-                    <div class="rg-form-actions">
-                        <button type="submit" class="btn btn-rg-primary">Record Final Decision</button>
-                    </div>
-                </form>
-            </div>
-        {% elif latest_final_decision %}
-            <div class="card p-4 mb-4">
-                <h2 class="h4 mb-2">Final Decision Recording</h2>
-                <div class="rg-empty-state">
-                    Final decision already recorded as {{ latest_final_decision.get_decision_outcome_display }} on
-                    {{ latest_final_decision.decided_at|date:"M d, Y H:i" }}.
-                    Submission-packet artifacts remain preserved as read-only.
+        <!-- Stage Status Panel -->
+        <div class="rg-stage-status mb-4">
+            <p class="rg-eyebrow">Stage Status</p>
+            {% if recruitment_case %}
+                <div class="rg-stage-status__prereq">
+                    <span>📋</span>
+                    <span>Current stage: <strong>{{ recruitment_case.get_current_stage_display }}</strong></span>
                 </div>
-            </div>
-        {% endif %}
+                <div class="rg-stage-status__prereq">
+                    <span class="rg-check-icon">✓</span>
+                    <span>Workflow routing rules enforced server-side</span>
+                </div>
+                <div class="rg-stage-status__prereq">
+                    <span class="rg-check-icon">✓</span>
+                    <span>Stage finalization produces read-only records</span>
+                </div>
+            {% else %}
+                <div class="rg-stage-status__prereq">
+                    <span>📋</span>
+                    <span>No active recruitment case created yet</span>
+                </div>
+            {% endif %}
+            <p class="rg-stage-status__warning">⚠ Stage skipping not allowed. Finalized outputs become read-only.</p>
+        </div>
 
-        {% if evidence_form %}
-            <div class="card p-4 mb-4">
-                <h2 class="h4 mb-2">Upload Evidence</h2>
-                <p class="rg-note mb-3">Store additional controlled documents in the encrypted Evidence Vault.</p>
-                <form method="post" action="{% url 'evidence-upload' application.pk %}" enctype="multipart/form-data">
-                    {% csrf_token %}
-                    <div class="rg-form-grid">
-                        {% for field in evidence_form %}
-                            {% include "recruitment/includes/form_field.html" with field=field %}
-                        {% endfor %}
-                    </div>
-                    <div class="rg-form-actions">
-                        <button type="submit" class="btn btn-rg-primary">Store Securely</button>
-                    </div>
-                </form>
+        <div class="rg-list-stack">
+            <div class="rg-admin-note">
+                <strong>Workflow decisions / approval</strong>
+                <p>Use the workflow action controls in this case to record routing decisions, endorsements, returns, and controlled non-final approval actions.</p>
             </div>
-        {% endif %}
-
-        {% if action_form %}
-            <div class="card p-4 mb-4">
-                <h2 class="h4 mb-2">Workflow Action</h2>
-                <p class="rg-note mb-3">
-                    {% if recruitment_case and recruitment_case.current_stage == "appointing_authority_review" %}
-                        Use this control only for allowed non-final workflow actions such as returning the packet to HRM Chief.
-                    {% else %}
-                        Record the next authorized workflow decision for the current stage.
-                    {% endif %}
-                </p>
-                <form method="post" action="{% url 'workflow-action' application.pk %}">
-                    {% csrf_token %}
-                    <div class="rg-form-grid">
-                        {% for field in action_form %}
-                            {% include "recruitment/includes/form_field.html" with field=field %}
-                        {% endfor %}
-                    </div>
-                    <div class="rg-form-actions">
-                        <button type="submit" class="btn btn-rg-primary">Record Decision</button>
-                    </div>
-                </form>
+            <div class="rg-admin-note">
+                <strong>Interview / ratings and deliberation support</strong>
+                <p>Interview scheduling, evaluator ratings, deliberation minutes, ranking support, and finalized lock behavior are all handled directly inside this protected case page.</p>
             </div>
-        {% endif %}
-
-        {% if override_form %}
-            <div class="card p-4 mb-4">
-                <h2 class="h4 mb-2">Level 2 Override</h2>
-                <p class="rg-note mb-3">Use only when Secretariat must explicitly process a Level 2 case with audit logging.</p>
-                <form method="post" action="{% url 'workflow-override' application.pk %}">
-                    {% csrf_token %}
-                    <div class="rg-form-grid">
-                        {% for field in override_form %}
-                            {% include "recruitment/includes/form_field.html" with field=field %}
-                        {% endfor %}
-                    </div>
-                    <div class="rg-form-actions">
-                        <button type="submit" class="btn btn-outline-danger">Grant Controlled Override</button>
-                    </div>
-                </form>
+            <div class="rg-admin-note">
+                <strong>Evidence export and audit traceability</strong>
+                <p>Controlled export, routing history, timeline records, and evidence version history remain tied to this protected case view.</p>
             </div>
-        {% endif %}
-
-        {% if reopen_form %}
-            <div class="card p-4">
-                <h2 class="h4 mb-2">Controlled Reopen</h2>
-                <p class="rg-note mb-3">Use only for stage-locked cases that need to be reopened back into the workflow with traceable justification.</p>
-                <form method="post" action="{% url 'workflow-reopen' application.pk %}">
-                    {% csrf_token %}
-                    <div class="rg-form-grid">
-                        {% for field in reopen_form %}
-                            {% include "recruitment/includes/form_field.html" with field=field %}
-                        {% endfor %}
-                    </div>
-                    <div class="rg-form-actions">
-                        <button type="submit" class="btn btn-outline-danger">Reopen Case</button>
-                    </div>
-                </form>
-            </div>
-        {% endif %}
+        </div>
     </div>
 </div>
+
+<script>
+(function(){
+    var tabs = document.querySelectorAll('.js-stage-tab');
+    tabs.forEach(function(tab){
+        tab.addEventListener('click', function(e){
+            e.preventDefault();
+            tabs.forEach(function(t){t.classList.remove('is-active');});
+            tab.classList.add('is-active');
+            document.querySelectorAll('.rg-stage-section').forEach(function(s){s.style.display='none';});
+            var target = document.getElementById(tab.dataset.section);
+            if(target) target.style.display='';
+        });
+    });
+})();
+</script>
 {% endblock %}

@@ -1,20 +1,15 @@
 {% extends "internal_base.html" %}
 
-{% block internal_content %}
+{% block content %}
 <div class="rg-page-header">
     <div>
         <p class="rg-eyebrow">Recruitment Entry Management</p>
         <h1 class="rg-page-title">{% if object %}Update Position{% else %}Create Position{% endif %}</h1>
-        <p class="rg-page-copy">Maintain the authoritative position details reused by recruitment entries across both Plantilla and COS within one internal platform.</p>
+        <p class="rg-page-copy">Maintain the reference position details that are reused by recruitment entries across both branches.</p>
     </div>
     <div class="rg-page-actions">
         <a href="{% url 'position-catalog-list' %}" class="btn btn-outline-secondary">Back to Position Catalog</a>
     </div>
-</div>
-
-<div class="rg-admin-note mb-4">
-    <strong>Catalog maintenance</strong>
-    <p>Keep position metadata clear and controlled here so downstream entry setup, screening references, and public intake content stay consistent.</p>
 </div>
 
 <div class="row justify-content-center">

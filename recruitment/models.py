@@ -5,13 +5,7 @@ from django.contrib.auth.models import AbstractUser
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
-
-from .requirements import (
-    APPLICANT_DOCUMENT_TYPE_CHOICES,
-    PERFORMANCE_RATING,
-    get_applicant_document_requirements,
-    get_required_applicant_document_requirements,
-)
+from django.utils.text import slugify
 
 
 class TimestampedModel(models.Model):
@@ -46,7 +40,9 @@ class RecruitmentUser(AbstractUser):
         }
 
     def save(self, *args, **kwargs):
-        self.is_staff = self.is_superuser or self.role == self.Role.SYSTEM_ADMIN
+        # Internal system administration is handled through the protected app views.
+        # Only actual Django superusers should inherit admin-site access.
+        self.is_staff = bool(self.is_superuser)
         super().save(*args, **kwargs)
 
     @property
@@ -243,7 +239,6 @@ class RecruitmentApplication(TimestampedModel):
     checklist_privacy_consent = models.BooleanField(default=False)
     checklist_documents_complete = models.BooleanField(default=False)
     checklist_information_certified = models.BooleanField(default=False)
-    performance_rating_not_applicable = models.BooleanField(default=False)
     cover_letter = models.TextField(blank=True)
     qualification_summary = models.TextField()
     otp_hash = models.CharField(max_length=64, blank=True)
@@ -290,57 +285,6 @@ class RecruitmentApplication(TimestampedModel):
         )
 
     @property
-    def uploaded_document_types(self):
-        return set(
-            self.evidence_items.exclude(document_type="").values_list("document_type", flat=True)
-        )
-
-    @property
-    def missing_required_document_types(self):
-        uploaded_document_types = self.uploaded_document_types
-        return [
-            requirement.code
-            for requirement in get_required_applicant_document_requirements(
-                performance_rating_not_applicable=self.performance_rating_not_applicable,
-            )
-            if requirement.code not in uploaded_document_types
-        ]
-
-    @property
-    def missing_required_document_labels(self):
-        missing_document_types = set(self.missing_required_document_types)
-        return [
-            requirement.title
-            for requirement in get_applicant_document_requirements()
-            if requirement.code in missing_document_types
-        ]
-
-    @property
-    def has_complete_required_documents(self):
-        return not self.missing_required_document_types
-
-    @property
-    def document_requirement_statuses(self):
-        uploaded_document_types = self.uploaded_document_types
-        statuses = []
-        for requirement in get_applicant_document_requirements():
-            is_not_applicable = (
-                requirement.code == PERFORMANCE_RATING and self.performance_rating_not_applicable
-            )
-            is_uploaded = requirement.code in uploaded_document_types
-            statuses.append(
-                {
-                    "code": requirement.code,
-                    "title": requirement.title,
-                    "help_text": requirement.help_text,
-                    "is_uploaded": is_uploaded,
-                    "is_not_applicable": is_not_applicable,
-                    "is_complete": is_uploaded or is_not_applicable,
-                }
-            )
-        return statuses
-
-    @property
     def otp_is_currently_valid(self):
         return bool(
             self.otp_verified_at
@@ -369,6 +313,7 @@ class RecruitmentCase(TimestampedModel):
         HRM_CHIEF_REVIEW = "hrm_chief_review", "HRM Chief Review"
         HRMPSB_REVIEW = "hrmpsb_review", "HRMPSB Review"
         APPOINTING_AUTHORITY_REVIEW = "appointing_authority_review", "Appointing Authority Review"
+        COMPLETION = "completion", "Completion Tracking"
         CLOSED = "closed", "Closed"
 
     class CaseStatus(models.TextChoices):
@@ -460,6 +405,7 @@ class RoutingHistory(TimestampedModel):
         FORWARD = "forward", "Forward Routing"
         OVERRIDE = "override", "Override Routing"
         REOPEN = "reopen", "Reopen Routing"
+        CLOSE = "close", "Case Closure"
 
     application = models.ForeignKey(
         RecruitmentApplication,
@@ -684,12 +630,6 @@ class ExamRecord(TimestampedModel):
 
     def clean(self):
         errors = {}
-        if not self.recruitment_case_id:
-            errors["recruitment_case"] = "Examination records must be linked to a recruitment case."
-        elif self.application_id and self.recruitment_case.application_id != self.application_id:
-            errors["recruitment_case"] = (
-                "Examination records must stay linked to the recruitment case of the same application."
-            )
         if self.review_stage not in {
             RecruitmentCase.Stage.SECRETARIAT_REVIEW,
             RecruitmentCase.Stage.HRM_CHIEF_REVIEW,
@@ -1046,18 +986,6 @@ class DeliberationRecord(TimestampedModel):
 
 
 class ComparativeAssessmentReport(TimestampedModel):
-    application = models.ForeignKey(
-        RecruitmentApplication,
-        on_delete=models.CASCADE,
-        related_name="comparative_assessment_reports",
-    )
-    recruitment_case = models.ForeignKey(
-        RecruitmentCase,
-        on_delete=models.CASCADE,
-        related_name="comparative_assessment_reports",
-        blank=True,
-        null=True,
-    )
     recruitment_entry = models.ForeignKey(
         PositionPosting,
         on_delete=models.CASCADE,
@@ -1073,7 +1001,7 @@ class ComparativeAssessmentReport(TimestampedModel):
     generated_by_role = models.CharField(max_length=40, blank=True)
     summary_notes = models.TextField(blank=True)
     consolidated_snapshot = models.JSONField(default=dict, blank=True)
-    generation_count = models.PositiveIntegerField(default=1)
+    version_number = models.PositiveIntegerField(default=1)
     evidence_item = models.ForeignKey(
         "EvidenceVaultItem",
         on_delete=models.SET_NULL,
@@ -1093,42 +1021,55 @@ class ComparativeAssessmentReport(TimestampedModel):
     finalized_by_role = models.CharField(max_length=40, blank=True)
 
     class Meta:
-        ordering = ["review_stage", "-updated_at"]
+        ordering = ["review_stage", "-version_number", "-created_at"]
         constraints = [
             models.UniqueConstraint(
-                fields=["application", "review_stage"],
-                name="unique_car_per_application_stage",
+                fields=["recruitment_entry", "review_stage", "version_number"],
+                name="unique_car_version_per_entry_stage",
             )
         ]
 
     def clean(self):
         errors = {}
-        if self.application_id and self.recruitment_entry_id and self.application.position_id != self.recruitment_entry_id:
-            errors["recruitment_entry"] = (
-                "Comparative Assessment Reports must stay linked to the recruitment entry of the same application."
-            )
-        if self.recruitment_case_id and self.application_id and self.recruitment_case.application_id != self.application_id:
-            errors["recruitment_case"] = (
-                "Comparative Assessment Reports must stay linked to the recruitment case of the same application."
-            )
         if self.recruitment_entry.branch != PositionPosting.Branch.PLANTILLA:
-            errors["recruitment_entry"] = "Comparative Assessment Reports are only supported for Plantilla recruitment entries."
+            errors["recruitment_entry"] = (
+                "Comparative Assessment Reports are only supported for Plantilla recruitment entries."
+            )
         if self.review_stage != RecruitmentCase.Stage.HRMPSB_REVIEW:
-            errors["review_stage"] = "Comparative Assessment Reports are only supported during the HRMPSB review stage."
+            errors["review_stage"] = (
+                "Comparative Assessment Reports are only supported during the HRMPSB review stage."
+            )
         if self.generated_by.role != RecruitmentUser.Role.HRMPSB_MEMBER:
-            errors["generated_by"] = "Only an HRMPSB Member may generate or update a Comparative Assessment Report."
+            errors["generated_by"] = (
+                "Only an HRMPSB Member may generate or update a Comparative Assessment Report."
+            )
+        if self.version_number < 1:
+            errors["version_number"] = "CAR version number must be a positive whole number."
         if self.is_finalized and not self.evidence_item_id:
-            errors["evidence_item"] = "Finalized Comparative Assessment Reports must link to the generated PDF artifact."
+            errors["evidence_item"] = (
+                "Finalized Comparative Assessment Reports must link to the generated PDF artifact."
+            )
+        if self.evidence_item_id:
+            if self.evidence_item.artifact_scope != EvidenceVaultItem.OwnerScope.ENTRY:
+                errors["evidence_item"] = (
+                    "Comparative Assessment Reports must link to an entry-owned Evidence Vault artifact."
+                )
+            elif self.evidence_item.recruitment_entry_id != self.recruitment_entry_id:
+                errors["evidence_item"] = (
+                    "The generated CAR artifact must stay linked to the same recruitment entry as the report."
+                )
         if self.is_finalized and not self.finalized_by_id:
-            errors["finalized_by"] = "Finalized Comparative Assessment Reports must record the finalizing user."
+            errors["finalized_by"] = (
+                "Finalized Comparative Assessment Reports must record the finalizing user."
+            )
         if not self.is_finalized and (self.finalized_by_id or self.finalized_at):
-            errors["finalized_at"] = "Draft Comparative Assessment Reports cannot include finalization metadata."
+            errors["finalized_at"] = (
+                "Draft Comparative Assessment Reports cannot include finalization metadata."
+            )
         if errors:
             raise ValidationError(errors)
 
     def save(self, *args, **kwargs):
-        self.recruitment_entry = self.application.position
-        self.recruitment_case = getattr(self.application, "case", None)
         self.branch = self.recruitment_entry.branch
         self.generated_by_role = self.generated_by.role
         if self.finalized_by_id:
@@ -1142,7 +1083,7 @@ class ComparativeAssessmentReport(TimestampedModel):
         return self.is_finalized
 
     def __str__(self):
-        return f"{self.recruitment_entry.job_code} {self.review_stage} CAR"
+        return f"{self.recruitment_entry.job_code} {self.review_stage} CAR v{self.version_number}"
 
 
 class ComparativeAssessmentReportItem(TimestampedModel):
@@ -1151,17 +1092,10 @@ class ComparativeAssessmentReportItem(TimestampedModel):
         on_delete=models.CASCADE,
         related_name="items",
     )
-    application = models.ForeignKey(
-        RecruitmentApplication,
-        on_delete=models.CASCADE,
-        related_name="comparative_assessment_report_items",
-    )
     recruitment_case = models.ForeignKey(
         RecruitmentCase,
         on_delete=models.CASCADE,
         related_name="comparative_assessment_report_items",
-        blank=True,
-        null=True,
     )
     deliberation_record = models.ForeignKey(
         DeliberationRecord,
@@ -1179,8 +1113,8 @@ class ComparativeAssessmentReportItem(TimestampedModel):
         ordering = ["rank_order", "created_at"]
         constraints = [
             models.UniqueConstraint(
-                fields=["report", "application"],
-                name="unique_car_item_per_report_application",
+                fields=["report", "recruitment_case"],
+                name="unique_car_item_per_report_case",
             ),
             models.UniqueConstraint(
                 fields=["report", "rank_order"],
@@ -1190,20 +1124,35 @@ class ComparativeAssessmentReportItem(TimestampedModel):
 
     def clean(self):
         errors = {}
-        if self.report_id and self.application.position_id != self.report.recruitment_entry_id:
-            errors["application"] = "CAR items must stay linked to the same recruitment entry as the report."
-        if self.recruitment_case_id and self.application_id and self.recruitment_case.application_id != self.application_id:
-            errors["recruitment_case"] = "CAR items must stay linked to the recruitment case of the same application."
-        if self.deliberation_record_id and self.application_id and self.deliberation_record.application_id != self.application_id:
-            errors["deliberation_record"] = "CAR items must stay linked to the same application as the deliberation record."
+        if (
+            self.report_id
+            and self.recruitment_case_id
+            and self.recruitment_case.application.position_id != self.report.recruitment_entry_id
+        ):
+            errors["recruitment_case"] = (
+                "CAR items must stay linked to a recruitment case from the same recruitment entry as the report."
+            )
+        if (
+            self.deliberation_record_id
+            and self.recruitment_case_id
+            and self.deliberation_record.recruitment_case_id != self.recruitment_case_id
+        ):
+            errors["deliberation_record"] = (
+                "CAR items must stay linked to the same recruitment case as the deliberation record."
+            )
         if self.rank_order < 1:
             errors["rank_order"] = "CAR rank order must be a positive whole number."
         if errors:
             raise ValidationError(errors)
 
     def save(self, *args, **kwargs):
-        self.recruitment_case = getattr(self.application, "case", None)
+        if not self.recruitment_case_id and self.deliberation_record_id:
+            self.recruitment_case = self.deliberation_record.recruitment_case
         super().save(*args, **kwargs)
+
+    @property
+    def application(self):
+        return self.recruitment_case.application
 
     def __str__(self):
         return f"{self.report} #{self.rank_order}"
@@ -1298,11 +1247,233 @@ class FinalDecision(TimestampedModel):
         return f"{self.application.reference_label} {self.get_decision_outcome_display()}"
 
 
+class NotificationLog(TimestampedModel):
+    class NotificationType(models.TextChoices):
+        SUBMISSION_ACKNOWLEDGMENT = "submission_acknowledgment", "Submission Acknowledgment"
+        SELECTED_APPLICANT = "selected_applicant", "Selected Applicant Notification"
+        NON_SELECTED_APPLICANT = "non_selected_applicant", "Non-selected Applicant Notification"
+        REQUIREMENT_CHECKLIST = "requirement_checklist", "Requirement Checklist Notification"
+        REMINDER = "reminder", "Reminder Notification"
+
+    class DeliveryChannel(models.TextChoices):
+        EMAIL = "email", "Email"
+
+    class DeliveryStatus(models.TextChoices):
+        PENDING = "pending", "Pending"
+        SENT = "sent", "Sent"
+        FAILED = "failed", "Failed"
+
+    application = models.ForeignKey(
+        RecruitmentApplication,
+        on_delete=models.CASCADE,
+        related_name="notifications",
+    )
+    recruitment_case = models.ForeignKey(
+        RecruitmentCase,
+        on_delete=models.CASCADE,
+        related_name="notifications",
+        blank=True,
+        null=True,
+    )
+    triggered_by = models.ForeignKey(
+        RecruitmentUser,
+        on_delete=models.PROTECT,
+        related_name="triggered_notifications",
+        blank=True,
+        null=True,
+    )
+    triggered_by_role = models.CharField(max_length=40, blank=True)
+    notification_type = models.CharField(
+        max_length=40,
+        choices=NotificationType.choices,
+    )
+    delivery_channel = models.CharField(
+        max_length=20,
+        choices=DeliveryChannel.choices,
+        default=DeliveryChannel.EMAIL,
+    )
+    delivery_status = models.CharField(
+        max_length=20,
+        choices=DeliveryStatus.choices,
+        default=DeliveryStatus.PENDING,
+    )
+    related_status = models.CharField(
+        max_length=40,
+        choices=RecruitmentApplication.Status.choices,
+        blank=True,
+    )
+    recipient_name = models.CharField(max_length=255, blank=True)
+    recipient_email = models.EmailField()
+    subject = models.CharField(max_length=255)
+    body = models.TextField()
+    sent_at = models.DateTimeField(blank=True, null=True)
+    failure_details = models.TextField(blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def save(self, *args, **kwargs):
+        if self.triggered_by_id:
+            self.triggered_by_role = self.triggered_by.role
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.get_notification_type_display()} to {self.recipient_email}"
+
+
+class CompletionRecord(TimestampedModel):
+    application = models.OneToOneField(
+        RecruitmentApplication,
+        on_delete=models.CASCADE,
+        related_name="completion_record",
+    )
+    recruitment_case = models.OneToOneField(
+        RecruitmentCase,
+        on_delete=models.CASCADE,
+        related_name="completion_record",
+    )
+    tracked_by = models.ForeignKey(
+        RecruitmentUser,
+        on_delete=models.PROTECT,
+        related_name="completion_records",
+    )
+    tracked_by_role = models.CharField(max_length=40, blank=True)
+    branch = models.CharField(max_length=20, choices=PositionPosting.Branch.choices)
+    level = models.PositiveSmallIntegerField(choices=PositionPosting.Level.choices)
+    completion_reference = models.CharField(max_length=255, blank=True)
+    completion_date = models.DateField(blank=True, null=True)
+    deadline = models.DateField(blank=True, null=True)
+    announcement_reference = models.CharField(max_length=255, blank=True)
+    announcement_date = models.DateField(blank=True, null=True)
+    remarks = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+
+    def clean(self):
+        errors = {}
+        if (
+            self.application_id
+            and self.recruitment_case_id
+            and self.recruitment_case.application_id != self.application_id
+        ):
+            errors["recruitment_case"] = "Completion tracking must point to the same application as the recruitment case."
+        if self.tracked_by.role not in {
+            RecruitmentUser.Role.SECRETARIAT,
+            RecruitmentUser.Role.HRM_CHIEF,
+        }:
+            errors["tracked_by"] = "Only Secretariat or HRM Chief may manage completion tracking."
+        if self.announcement_date and not self.announcement_reference:
+            errors["announcement_reference"] = "Provide an announcement reference when setting an announcement date."
+        if self.branch == PositionPosting.Branch.COS and (
+            self.announcement_reference or self.announcement_date
+        ):
+            errors["announcement_reference"] = (
+                "Announcement tracking is only supported for Plantilla completion handling."
+            )
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        if self.recruitment_case_id and not self.application_id:
+            self.application = self.recruitment_case.application
+        if self.application_id and not self.recruitment_case_id and hasattr(self.application, "case"):
+            self.recruitment_case = self.application.case
+        self.branch = self.application.branch
+        self.level = self.application.level
+        self.tracked_by_role = self.tracked_by.role
+        super().save(*args, **kwargs)
+
+    @property
+    def completion_label(self):
+        if self.branch == PositionPosting.Branch.PLANTILLA:
+            return "Appointment"
+        return "Contract"
+
+    @property
+    def has_pending_requirements(self):
+        return self.requirements.filter(
+            status=CompletionRequirement.RequirementStatus.PENDING
+        ).exists()
+
+    @property
+    def requirements_ready_for_closure(self):
+        return self.requirements.exists() and not self.has_pending_requirements
+
+    @property
+    def completed_requirement_count(self):
+        return self.requirements.exclude(
+            status=CompletionRequirement.RequirementStatus.PENDING
+        ).count()
+
+    @property
+    def total_requirement_count(self):
+        return self.requirements.count()
+
+    def __str__(self):
+        return f"{self.completion_label} completion for {self.application.reference_label}"
+
+
+class CompletionRequirement(TimestampedModel):
+    class RequirementStatus(models.TextChoices):
+        PENDING = "pending", "Pending"
+        COMPLETED = "completed", "Completed"
+        NOT_APPLICABLE = "not_applicable", "Not Applicable"
+
+    completion_record = models.ForeignKey(
+        CompletionRecord,
+        on_delete=models.CASCADE,
+        related_name="requirements",
+    )
+    item_label = models.CharField(max_length=255)
+    status = models.CharField(
+        max_length=20,
+        choices=RequirementStatus.choices,
+        default=RequirementStatus.PENDING,
+    )
+    notes = models.TextField(blank=True)
+    display_order = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        ordering = ["display_order", "created_at"]
+
+    def clean(self):
+        if not self.item_label.strip():
+            raise ValidationError({"item_label": "Requirement item label is required."})
+
+    def save(self, *args, **kwargs):
+        self.item_label = self.item_label.strip()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.item_label} ({self.get_status_display()})"
+
+
 class EvidenceVaultItem(TimestampedModel):
+    class OwnerScope(models.TextChoices):
+        APPLICATION = "application", "Application"
+        CASE = "case", "Recruitment Case"
+        ENTRY = "entry", "Recruitment Entry"
+
+    class Stage(models.TextChoices):
+        APPLICANT_INTAKE = "applicant_intake", "Applicant Intake"
+        SECRETARIAT_REVIEW = RecruitmentCase.Stage.SECRETARIAT_REVIEW, "Secretariat Review"
+        HRM_CHIEF_REVIEW = RecruitmentCase.Stage.HRM_CHIEF_REVIEW, "HRM Chief Review"
+        HRMPSB_REVIEW = RecruitmentCase.Stage.HRMPSB_REVIEW, "HRMPSB Review"
+        APPOINTING_AUTHORITY_REVIEW = (
+            RecruitmentCase.Stage.APPOINTING_AUTHORITY_REVIEW,
+            "Appointing Authority Review",
+        )
+        COMPLETION = RecruitmentCase.Stage.COMPLETION, "Completion Tracking"
+        CLOSED = RecruitmentCase.Stage.CLOSED, "Closed"
+
     application = models.ForeignKey(
         RecruitmentApplication,
         on_delete=models.CASCADE,
         related_name="evidence_items",
+        blank=True,
+        null=True,
     )
     recruitment_case = models.ForeignKey(
         RecruitmentCase,
@@ -1311,35 +1482,190 @@ class EvidenceVaultItem(TimestampedModel):
         blank=True,
         null=True,
     )
-    workflow_stage = models.CharField(
-        max_length=40,
-        choices=RecruitmentCase.Stage.choices,
+    recruitment_entry = models.ForeignKey(
+        PositionPosting,
+        on_delete=models.PROTECT,
+        related_name="evidence_items",
         blank=True,
+        null=True,
     )
+    artifact_scope = models.CharField(
+        max_length=20,
+        choices=OwnerScope.choices,
+        default=OwnerScope.APPLICATION,
+    )
+    artifact_type = models.CharField(max_length=80, blank=True, default="supporting_document")
     uploaded_by = models.ForeignKey(
         RecruitmentUser,
         on_delete=models.PROTECT,
         related_name="uploaded_evidence",
     )
-    label = models.CharField(max_length=150)
-    document_type = models.CharField(
-        max_length=50,
-        choices=APPLICANT_DOCUMENT_TYPE_CHOICES,
-        blank=True,
-        db_index=True,
+    uploaded_by_role = models.CharField(max_length=40, blank=True, default="")
+    stage = models.CharField(
+        max_length=40,
+        choices=Stage.choices,
+        default=Stage.APPLICANT_INTAKE,
     )
+    label = models.CharField(max_length=150)
+    document_key = models.CharField(max_length=150, db_index=True, editable=False, default="")
+    version_family = models.UUIDField(default=uuid.uuid4, editable=False, db_index=True)
+    version_number = models.PositiveIntegerField(default=1)
+    previous_version = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        related_name="next_versions",
+        blank=True,
+        null=True,
+    )
+    is_current_version = models.BooleanField(default=True)
+    is_archived = models.BooleanField(default=False)
+    archive_tag = models.CharField(max_length=255, blank=True)
+    archived_at = models.DateTimeField(blank=True, null=True)
+    archived_by = models.ForeignKey(
+        RecruitmentUser,
+        on_delete=models.PROTECT,
+        related_name="archived_evidence",
+        blank=True,
+        null=True,
+    )
+    archived_by_role = models.CharField(max_length=40, blank=True, default="")
     original_filename = models.CharField(max_length=255)
     content_type = models.CharField(max_length=255, blank=True)
     size_bytes = models.PositiveIntegerField()
+    digest_algorithm = models.CharField(max_length=20, default="sha256")
     sha256_digest = models.CharField(max_length=64)
     nonce = models.BinaryField()
     ciphertext = models.BinaryField()
 
     class Meta:
         ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["version_family", "version_number"],
+                name="unique_evidence_version_per_family",
+            ),
+            models.CheckConstraint(
+                name="evidence_owner_matches_scope",
+                condition=(
+                    (
+                        models.Q(artifact_scope="application")
+                        & models.Q(application__isnull=False)
+                        & models.Q(recruitment_case__isnull=True)
+                        & models.Q(recruitment_entry__isnull=True)
+                    )
+                    | (
+                        models.Q(artifact_scope="case")
+                        & models.Q(application__isnull=True)
+                        & models.Q(recruitment_case__isnull=False)
+                        & models.Q(recruitment_entry__isnull=True)
+                    )
+                    | (
+                        models.Q(artifact_scope="entry")
+                        & models.Q(application__isnull=True)
+                        & models.Q(recruitment_case__isnull=True)
+                        & models.Q(recruitment_entry__isnull=False)
+                    )
+                ),
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["artifact_scope", "application", "stage", "document_key"]),
+            models.Index(fields=["artifact_scope", "recruitment_case", "stage", "document_key"]),
+            models.Index(fields=["artifact_scope", "recruitment_entry", "stage", "document_key"]),
+            models.Index(fields=["is_archived", "stage"]),
+        ]
+
+    @staticmethod
+    def build_document_key(label):
+        normalized = slugify(label or "")
+        return normalized[:150] or f"artifact-{uuid.uuid4().hex[:12]}"
+
+    def owner_signature(self):
+        if self.artifact_scope == self.OwnerScope.APPLICATION:
+            return self.artifact_scope, self.application_id
+        if self.artifact_scope == self.OwnerScope.CASE:
+            return self.artifact_scope, self.recruitment_case_id
+        return self.artifact_scope, self.recruitment_entry_id
+
+    def clean(self):
+        errors = {}
+        owner_count = sum(
+            bool(owner_id)
+            for owner_id in [self.application_id, self.recruitment_case_id, self.recruitment_entry_id]
+        )
+        if owner_count != 1:
+            errors["artifact_scope"] = (
+                "Evidence must belong to exactly one owner scope: application, recruitment case, or recruitment entry."
+            )
+        if self.artifact_scope == self.OwnerScope.APPLICATION and not self.application_id:
+            errors["application"] = "Application-owned evidence must point to an application."
+        if self.artifact_scope == self.OwnerScope.CASE and not self.recruitment_case_id:
+            errors["recruitment_case"] = "Case-owned evidence must point to a recruitment case."
+        if self.artifact_scope == self.OwnerScope.ENTRY and not self.recruitment_entry_id:
+            errors["recruitment_entry"] = "Entry-owned evidence must point to a recruitment entry."
+        if self.is_archived and not self.archive_tag.strip():
+            errors["archive_tag"] = "Provide an archive tag when marking evidence as archived."
+        if self.previous_version_id:
+            if self.previous_version.owner_signature() != self.owner_signature():
+                errors["previous_version"] = "Version history must stay within the same artifact owner scope."
+            if self.previous_version.document_key != self.document_key:
+                errors["document_key"] = "Version history must stay within the same document key."
+            if self.previous_version.artifact_scope != self.artifact_scope:
+                errors["artifact_scope"] = "Version history must stay within the same artifact scope."
+            if self.previous_version.version_family != self.version_family:
+                errors["version_family"] = "Version history must stay within the same version family."
+            if self.previous_version.version_number >= self.version_number:
+                errors["version_number"] = "Version number must increase from the previous evidence version."
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        if not self.document_key:
+            self.document_key = self.build_document_key(self.label)
+        if self.uploaded_by_id:
+            self.uploaded_by_role = self.uploaded_by.role
+        if not self.artifact_type:
+            self.artifact_type = "supporting_document"
+        if self.archived_by_id:
+            self.archived_by_role = self.archived_by.role
+        elif not self.is_archived:
+            self.archived_by_role = ""
+        super().save(*args, **kwargs)
+
+    @property
+    def version_label(self):
+        return f"v{self.version_number}"
+
+    @property
+    def owning_application(self):
+        if self.application_id:
+            return self.application
+        if self.recruitment_case_id:
+            return self.recruitment_case.application
+        return None
+
+    @property
+    def owning_case(self):
+        return self.recruitment_case
+
+    @property
+    def owning_recruitment_entry(self):
+        if self.recruitment_entry_id:
+            return self.recruitment_entry
+        if self.application_id:
+            return self.application.position
+        if self.recruitment_case_id:
+            return self.recruitment_case.application.position
+        return None
 
     def __str__(self):
-        return f"{self.application.reference_number} - {self.label}"
+        owner = self.owning_application
+        if owner is not None:
+            owner_label = owner.reference_number or f"application-{owner.pk}"
+        else:
+            entry = self.owning_recruitment_entry
+            owner_label = entry.job_code if entry is not None else f"artifact-{self.pk or 'new'}"
+        return f"{owner_label} - {self.label} ({self.version_label})"
 
 
 class AuditLog(TimestampedModel):
@@ -1378,11 +1704,31 @@ class AuditLog(TimestampedModel):
         CAR_GENERATED = "car_generated", "Comparative Assessment Report Generated"
         CAR_FINALIZED = "car_finalized", "Comparative Assessment Report Finalized"
         DECISION_RECORDED = "decision_recorded", "Decision Recorded"
+        COMPLETION_RECORDED = "completion_recorded", "Completion Recorded"
+        CASE_CLOSED = "case_closed", "Case Closed"
+        NOTIFICATION_SENT = "notification_sent", "Notification Sent"
+        NOTIFICATION_FAILED = "notification_failed", "Notification Failed"
         OVERRIDE_GRANTED = "override_granted", "Override Granted"
         OVERRIDE_USED = "override_used", "Override Used"
         EVIDENCE_UPLOADED = "evidence_uploaded", "Evidence Uploaded"
         EVIDENCE_DOWNLOADED = "evidence_downloaded", "Evidence Downloaded"
+        EVIDENCE_ARCHIVED = "evidence_archived", "Evidence Archived"
+        EVIDENCE_RESTORED = "evidence_restored", "Evidence Restored"
+        PROTECTED_RECORD_VIEWED = "protected_record_viewed", "Protected Record Viewed"
+        EVIDENCE_VAULT_VIEWED = "evidence_vault_viewed", "Evidence Vault Viewed"
+        AUDIT_LOG_VIEWED = "audit_log_viewed", "Audit Log Viewed"
         EXPORT_GENERATED = "export_generated", "Export Generated"
+
+    SENSITIVE_ACTIONS = {
+        Action.CASE_REOPENED,
+        Action.EXPORT_GENERATED,
+        Action.EVIDENCE_DOWNLOADED,
+        Action.OVERRIDE_GRANTED,
+        Action.OVERRIDE_USED,
+        Action.PROTECTED_RECORD_VIEWED,
+        Action.EVIDENCE_VAULT_VIEWED,
+        Action.AUDIT_LOG_VIEWED,
+    }
 
     application = models.ForeignKey(
         RecruitmentApplication,
@@ -1399,12 +1745,39 @@ class AuditLog(TimestampedModel):
         null=True,
     )
     actor_role = models.CharField(max_length=40, blank=True)
+    case_reference = models.CharField(max_length=30, blank=True)
+    workflow_stage = models.CharField(max_length=40, blank=True)
     action = models.CharField(max_length=50, choices=Action.choices)
     description = models.TextField()
     metadata = models.JSONField(default=dict, blank=True)
+    is_sensitive_access = models.BooleanField(default=False)
 
     class Meta:
         ordering = ["-created_at"]
+
+    def _infer_workflow_stage(self):
+        metadata = self.metadata if isinstance(self.metadata, dict) else {}
+        for key in ("to_stage", "case_stage", "review_stage", "stage"):
+            value = metadata.get(key)
+            if value:
+                return value
+        if self.application_id:
+            case = getattr(self.application, "case", None)
+            if case and case.current_stage:
+                return case.current_stage
+            return self.application.status
+        return ""
+
+    def save(self, *args, **kwargs):
+        if self.actor_id and not self.actor_role:
+            self.actor_role = self.actor.role
+        if self.application_id and not self.case_reference:
+            self.case_reference = self.application.reference_number or ""
+        if not self.workflow_stage:
+            self.workflow_stage = self._infer_workflow_stage()
+        if self.action in self.SENSITIVE_ACTIONS:
+            self.is_sensitive_access = True
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.get_action_display()} @ {self.created_at:%Y-%m-%d %H:%M}"

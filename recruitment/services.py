@@ -4,6 +4,7 @@ import hmac
 import json
 import os
 import secrets
+import textwrap
 import uuid
 import zipfile
 from datetime import timedelta
@@ -12,10 +13,12 @@ from io import BytesIO, StringIO
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.mail import send_mail
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
+from django.utils.text import slugify
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
@@ -23,6 +26,8 @@ from .models import (
     AuditLog,
     ComparativeAssessmentReport,
     ComparativeAssessmentReportItem,
+    CompletionRecord,
+    CompletionRequirement,
     DeliberationRecord,
     ExamRecord,
     EvidenceVaultItem,
@@ -38,11 +43,20 @@ from .models import (
     ScreeningRecord,
     WorkflowOverride,
 )
-from .requirements import APPLICANT_DOCUMENT_REQUIREMENTS_BY_CODE, get_applicant_document_requirements
+from .notification_services import (
+    queue_non_selected_applicant_notification,
+    queue_selected_applicant_notification,
+    queue_submission_acknowledgment_notification,
+)
 from .permissions import WORKFLOW_PROCESSOR_ROLES
+from .requirements import (
+    APPLICANT_DOCUMENT_REQUIREMENTS_BY_CODE,
+    get_required_applicant_document_requirements,
+)
 
 
 EXPORT_ROLES = {
+    RecruitmentUser.Role.SECRETARIAT,
     RecruitmentUser.Role.HRM_CHIEF,
     RecruitmentUser.Role.APPOINTING_AUTHORITY,
 }
@@ -79,6 +93,10 @@ INTERVIEW_RATING_ROLES_BY_STAGE = {
     RecruitmentCase.Stage.HRMPSB_REVIEW: {RecruitmentUser.Role.HRMPSB_MEMBER},
 }
 INTERVIEW_FALLBACK_LABEL = "Interview Rating Sheet (Fallback)"
+ARTIFACT_TYPE_APPLICANT_DOCUMENT = "applicant_document"
+ARTIFACT_TYPE_WORKFLOW_EVIDENCE = "workflow_evidence"
+ARTIFACT_TYPE_INTERVIEW_FALLBACK = "interview_fallback_rating_sheet"
+ARTIFACT_TYPE_COMPARATIVE_ASSESSMENT_REPORT = "comparative_assessment_report"
 DELIBERATION_STAGES_BY_BRANCH = {
     PositionPosting.Branch.COS: RecruitmentCase.Stage.HRM_CHIEF_REVIEW,
     PositionPosting.Branch.PLANTILLA: RecruitmentCase.Stage.HRMPSB_REVIEW,
@@ -94,16 +112,35 @@ FINAL_DECISION_OUTCOME_TO_STATUS = {
     FinalDecision.Outcome.SELECTED: RecruitmentApplication.Status.APPROVED,
     FinalDecision.Outcome.NOT_SELECTED: RecruitmentApplication.Status.REJECTED,
 }
+COMPLETION_REVIEW_ROLES = SCREENING_REVIEW_ROLES
+COMPLETION_STAGES = {
+    RecruitmentCase.Stage.COMPLETION,
+}
+EVIDENCE_ARCHIVE_ROLES = WORKFLOW_PROCESSOR_ROLES
+
+
+def _copy_metadata(metadata):
+    return dict(metadata or {})
 
 
 def record_audit_event(application, actor, action, description, metadata=None):
+    metadata = _copy_metadata(metadata)
+    if application is not None:
+        metadata.setdefault("case_reference", application.reference_number or "")
+        case = getattr(application, "case", None)
+        if case is not None:
+            metadata.setdefault("case_stage", case.current_stage)
+            metadata.setdefault("case_status", case.case_status)
+            metadata.setdefault("case_handler_role", case.current_handler_role)
+        elif application.status:
+            metadata.setdefault("application_status", application.status)
     return AuditLog.objects.create(
         application=application,
         actor=actor,
         actor_role=getattr(actor, "role", ""),
         action=action,
         description=description,
-        metadata=metadata or {},
+        metadata=metadata,
     )
 
 
@@ -113,6 +150,75 @@ def record_system_audit_event(actor, action, description, metadata=None):
         actor=actor,
         action=action,
         description=description,
+        metadata=metadata,
+    )
+
+
+def record_protected_record_access(application, actor, source):
+    return record_audit_event(
+        application=application,
+        actor=actor,
+        action=AuditLog.Action.PROTECTED_RECORD_VIEWED,
+        description="Reviewed a protected recruitment case record.",
+        metadata={
+            "access_source": source,
+        },
+    )
+
+
+def record_evidence_vault_access(
+    actor,
+    *,
+    search_query="",
+    stage="",
+    artifact_scope="",
+    archival_status="",
+    current_version_only=True,
+):
+    return record_system_audit_event(
+        actor=actor,
+        action=AuditLog.Action.EVIDENCE_VAULT_VIEWED,
+        description="Reviewed evidence vault records.",
+        metadata={
+            "search_query": search_query,
+            "stage": stage,
+            "artifact_scope": artifact_scope,
+            "archival_status": archival_status,
+            "current_version_only": bool(current_version_only),
+        },
+    )
+
+
+def record_audit_log_review(
+    actor,
+    *,
+    application=None,
+    search_query="",
+    action="",
+    actor_role="",
+    sensitive_only=False,
+    result_count=0,
+):
+    metadata = {
+        "review_scope": "application_audit" if application is not None else "system_audit",
+        "search_query": search_query,
+        "action_filter": action,
+        "actor_role_filter": actor_role,
+        "sensitive_only": bool(sensitive_only),
+        "result_count": result_count,
+    }
+    if application is not None:
+        return record_audit_event(
+            application=application,
+            actor=actor,
+            action=AuditLog.Action.AUDIT_LOG_VIEWED,
+            description="Reviewed the application audit trail.",
+            metadata=metadata,
+        )
+    return record_system_audit_event(
+        actor=actor,
+        action=AuditLog.Action.AUDIT_LOG_VIEWED,
+        description="Reviewed system audit logs.",
         metadata=metadata,
     )
 
@@ -178,6 +284,18 @@ def get_queue_for_user(user):
     return queryset
 
 
+def _user_has_closed_application_access(user, application):
+    case = getattr(application, "case", None)
+    if (
+        user.role == RecruitmentUser.Role.SECRETARIAT
+        and application.level == PositionPosting.Level.LEVEL_2
+    ):
+        return False
+    if case and case.current_stage == RecruitmentCase.Stage.CLOSED:
+        return user.role in WORKFLOW_PROCESSOR_ROLES
+    return user.role in EXPORT_ROLES
+
+
 def get_manageable_positions(user):
     if user.role not in ENTRY_MANAGER_ROLES:
         return Position.objects.none()
@@ -207,8 +325,8 @@ def user_can_view_application(user, application):
     if application.status in {
         RecruitmentApplication.Status.APPROVED,
         RecruitmentApplication.Status.REJECTED,
-    } and user.role in EXPORT_ROLES:
-        return True
+    }:
+        return _user_has_closed_application_access(user, application)
     return False
 
 
@@ -240,6 +358,14 @@ def user_can_upload_evidence(user, application):
     if user.role == RecruitmentUser.Role.APPLICANT and application.applicant_id == user.id:
         return application.is_editable_by_applicant
     return user_can_process_application(user, application)
+
+
+def user_can_manage_evidence_archive(user, application):
+    return user.role in EVIDENCE_ARCHIVE_ROLES and user_can_view_application(user, application)
+
+
+def user_can_export_application(user, application):
+    return user.role in EXPORT_ROLES and user_can_view_application(user, application)
 
 
 def generate_submission_hash(application):
@@ -275,17 +401,26 @@ def _application_status_from_stage(stage):
         RecruitmentCase.Stage.HRM_CHIEF_REVIEW: RecruitmentApplication.Status.HRM_CHIEF_REVIEW,
         RecruitmentCase.Stage.HRMPSB_REVIEW: RecruitmentApplication.Status.HRMPSB_REVIEW,
         RecruitmentCase.Stage.APPOINTING_AUTHORITY_REVIEW: RecruitmentApplication.Status.APPOINTING_AUTHORITY_REVIEW,
+        RecruitmentCase.Stage.COMPLETION: RecruitmentApplication.Status.APPROVED,
     }
     return status_map.get(stage, "")
 
 
-def _handler_role_from_stage(stage):
+def _completion_handler_role(application):
+    if application.level == PositionPosting.Level.LEVEL_1:
+        return RecruitmentUser.Role.SECRETARIAT
+    return RecruitmentUser.Role.HRM_CHIEF
+
+
+def _handler_role_from_stage(stage, application=None):
     role_map = {
         RecruitmentCase.Stage.SECRETARIAT_REVIEW: RecruitmentUser.Role.SECRETARIAT,
         RecruitmentCase.Stage.HRM_CHIEF_REVIEW: RecruitmentUser.Role.HRM_CHIEF,
         RecruitmentCase.Stage.HRMPSB_REVIEW: RecruitmentUser.Role.HRMPSB_MEMBER,
         RecruitmentCase.Stage.APPOINTING_AUTHORITY_REVIEW: RecruitmentUser.Role.APPOINTING_AUTHORITY,
     }
+    if stage == RecruitmentCase.Stage.COMPLETION and application is not None:
+        return _completion_handler_role(application)
     return role_map.get(stage, "")
 
 
@@ -324,10 +459,227 @@ def get_case_timeline(application):
             AuditLog.Action.CAR_GENERATED,
             AuditLog.Action.CAR_FINALIZED,
             AuditLog.Action.DECISION_RECORDED,
+            AuditLog.Action.COMPLETION_RECORDED,
+            AuditLog.Action.CASE_CLOSED,
+            AuditLog.Action.NOTIFICATION_SENT,
+            AuditLog.Action.NOTIFICATION_FAILED,
             AuditLog.Action.OVERRIDE_GRANTED,
             AuditLog.Action.OVERRIDE_USED,
+            AuditLog.Action.EVIDENCE_UPLOADED,
+            AuditLog.Action.EVIDENCE_DOWNLOADED,
+            AuditLog.Action.EVIDENCE_ARCHIVED,
+            AuditLog.Action.EVIDENCE_RESTORED,
+            AuditLog.Action.EXPORT_GENERATED,
         ]
     ).order_by("created_at")
+
+
+def _filter_audit_logs(queryset, *, search_query="", action="", actor_role="", sensitive_only=False):
+    if search_query:
+        queryset = queryset.filter(
+            Q(case_reference__icontains=search_query)
+            | Q(workflow_stage__icontains=search_query)
+            | Q(description__icontains=search_query)
+            | Q(actor__username__icontains=search_query)
+            | Q(actor__first_name__icontains=search_query)
+            | Q(actor__last_name__icontains=search_query)
+        )
+    if action:
+        queryset = queryset.filter(action=action)
+    if actor_role:
+        queryset = queryset.filter(actor_role=actor_role)
+    if sensitive_only:
+        queryset = queryset.filter(is_sensitive_access=True)
+    return queryset
+
+
+def get_application_audit_logs(
+    application,
+    *,
+    search_query="",
+    action="",
+    actor_role="",
+    sensitive_only=False,
+):
+    queryset = application.audit_logs.select_related(
+        "actor",
+        "application",
+        "application__position",
+    ).order_by("-created_at")
+    return _filter_audit_logs(
+        queryset,
+        search_query=search_query,
+        action=action,
+        actor_role=actor_role,
+        sensitive_only=sensitive_only,
+    )
+
+
+def get_system_audit_logs(*, search_query="", action="", actor_role="", sensitive_only=False):
+    queryset = AuditLog.objects.filter(application__isnull=True).select_related("actor").order_by("-created_at")
+    return _filter_audit_logs(
+        queryset,
+        search_query=search_query,
+        action=action,
+        actor_role=actor_role,
+        sensitive_only=sensitive_only,
+    )
+
+
+def _evidence_stage_for_application(application):
+    case = getattr(application, "case", None)
+    if case and case.current_stage:
+        return case.current_stage
+    derived_stage = _review_stage_from_application_status(application.status)
+    if derived_stage:
+        return derived_stage
+    return EvidenceVaultItem.Stage.APPLICANT_INTAKE
+
+
+def _accessible_application_ids_for_user(user):
+    if user.role not in WORKFLOW_PROCESSOR_ROLES:
+        return []
+    applications = RecruitmentApplication.objects.select_related(
+        "position",
+        "case",
+        "applicant",
+    ).order_by("-updated_at")
+    return [application.id for application in applications if user_can_view_application(user, application)]
+
+
+def _evidence_context_filter_for_application(application):
+    filters = Q(
+        artifact_scope=EvidenceVaultItem.OwnerScope.APPLICATION,
+        application=application,
+    ) | Q(
+        artifact_scope=EvidenceVaultItem.OwnerScope.ENTRY,
+        recruitment_entry=application.position,
+    )
+    case = getattr(application, "case", None)
+    if case is not None:
+        filters |= Q(
+            artifact_scope=EvidenceVaultItem.OwnerScope.CASE,
+            recruitment_case=case,
+        )
+    return filters
+
+
+def evidence_belongs_to_application_context(evidence, application):
+    if evidence.artifact_scope == EvidenceVaultItem.OwnerScope.APPLICATION:
+        return evidence.application_id == application.id
+    if evidence.artifact_scope == EvidenceVaultItem.OwnerScope.CASE:
+        case = getattr(application, "case", None)
+        return case is not None and evidence.recruitment_case_id == case.id
+    return evidence.recruitment_entry_id == application.position_id
+
+
+def get_evidence_context_application_for_user(user, evidence, preferred_application=None):
+    candidates = []
+    if preferred_application is not None:
+        candidates.append(preferred_application)
+    if evidence.application_id:
+        candidates.append(evidence.application)
+    if evidence.recruitment_case_id:
+        candidates.append(evidence.recruitment_case.application)
+    if evidence.recruitment_entry_id:
+        candidates.extend(
+            RecruitmentApplication.objects.select_related("position", "case", "applicant")
+            .filter(position_id=evidence.recruitment_entry_id)
+            .order_by("-submitted_at", "-updated_at", "-created_at")
+        )
+    seen_ids = set()
+    for candidate in candidates:
+        if candidate is None or candidate.id in seen_ids:
+            continue
+        seen_ids.add(candidate.id)
+        if user_can_view_application(user, candidate) and evidence_belongs_to_application_context(
+            evidence,
+            candidate,
+        ):
+            return candidate
+    return None
+
+
+def get_evidence_queryset_for_user(
+    user,
+    *,
+    application=None,
+    search_query="",
+    stage="",
+    artifact_scope="",
+    archival_status="active",
+    current_version_only=False,
+):
+    queryset = EvidenceVaultItem.objects.select_related(
+        "application",
+        "application__position",
+        "recruitment_case",
+        "recruitment_case__application",
+        "recruitment_case__application__position",
+        "recruitment_entry",
+        "uploaded_by",
+        "archived_by",
+        "previous_version",
+    )
+    if application is not None:
+        if not user_can_view_application(user, application):
+            return queryset.none()
+        queryset = queryset.filter(_evidence_context_filter_for_application(application))
+    else:
+        accessible_ids = _accessible_application_ids_for_user(user)
+        if not accessible_ids:
+            return queryset.none()
+        case_ids = list(
+            RecruitmentCase.objects.filter(application_id__in=accessible_ids).values_list("id", flat=True)
+        )
+        entry_ids = list(
+            PositionPosting.objects.filter(applications__id__in=accessible_ids)
+            .distinct()
+            .values_list("id", flat=True)
+        )
+        queryset = queryset.filter(
+            Q(
+                artifact_scope=EvidenceVaultItem.OwnerScope.APPLICATION,
+                application_id__in=accessible_ids,
+            )
+            | Q(
+                artifact_scope=EvidenceVaultItem.OwnerScope.CASE,
+                recruitment_case_id__in=case_ids,
+            )
+            | Q(
+                artifact_scope=EvidenceVaultItem.OwnerScope.ENTRY,
+                recruitment_entry_id__in=entry_ids,
+            )
+        )
+
+    if search_query:
+        search_query = search_query.strip()
+        queryset = queryset.filter(
+            Q(label__icontains=search_query)
+            | Q(original_filename__icontains=search_query)
+            | Q(sha256_digest__icontains=search_query)
+            | Q(archive_tag__icontains=search_query)
+            | Q(application__reference_number__icontains=search_query)
+            | Q(application__position__title__icontains=search_query)
+            | Q(recruitment_case__application__reference_number__icontains=search_query)
+            | Q(recruitment_case__application__position__title__icontains=search_query)
+            | Q(recruitment_entry__job_code__icontains=search_query)
+            | Q(recruitment_entry__title__icontains=search_query)
+            | Q(uploaded_by__username__icontains=search_query)
+            | Q(uploaded_by__first_name__icontains=search_query)
+            | Q(uploaded_by__last_name__icontains=search_query)
+        )
+    if stage:
+        queryset = queryset.filter(stage=stage)
+    if artifact_scope:
+        queryset = queryset.filter(artifact_scope=artifact_scope)
+    if archival_status == "archived":
+        queryset = queryset.filter(is_archived=True)
+    elif archival_status == "active":
+        queryset = queryset.filter(is_archived=False)
+    if current_version_only:
+        queryset = queryset.filter(is_current_version=True)
+    return queryset.order_by("artifact_scope", "-created_at", "document_key", "-version_number")
 
 
 def user_can_reopen_case(user, case):
@@ -405,21 +757,6 @@ def get_interview_session(application, stage=None):
     ).filter(review_stage=review_stage).first()
 
 
-def get_interview_fallback_evidence(application, stage=None):
-    queryset = application.evidence_items.select_related(
-        "uploaded_by",
-        "recruitment_case",
-    ).filter(
-        label__startswith=INTERVIEW_FALLBACK_LABEL,
-    )
-    case = getattr(application, "case", None)
-    if case:
-        queryset = queryset.filter(recruitment_case=case)
-    if stage:
-        queryset = queryset.filter(workflow_stage=stage)
-    return queryset.order_by("created_at")
-
-
 def get_interview_sessions(application):
     sessions = list(
         application.interview_sessions.select_related(
@@ -427,31 +764,47 @@ def get_interview_sessions(application):
             "finalized_by",
             "recruitment_case",
             "recruitment_entry",
-        ).prefetch_related(
-            "ratings__rated_by",
-        ).order_by("created_at")
+        ).prefetch_related("ratings__rated_by").order_by("created_at")
     )
     fallback_items = list(get_interview_fallback_evidence(application))
     fallback_by_stage = {}
     for item in fallback_items:
-        fallback_by_stage.setdefault(item.workflow_stage, []).append(item)
+        fallback_by_stage.setdefault(item.stage, []).append(item)
     for session in sessions:
         session.fallback_evidence_items = fallback_by_stage.get(session.review_stage, [])
     return sessions
 
 
 def get_interview_ratings(application, stage=None):
-    interview_session = get_interview_session(application, stage=stage)
-    if not interview_session:
-        return InterviewRating.objects.none()
-    return interview_session.ratings.select_related("rated_by").order_by("created_at")
+    review_stage = stage or get_current_review_stage(application)
+    return application.interview_ratings.select_related(
+        "rated_by",
+        "interview_session",
+    ).filter(review_stage=review_stage).order_by("created_at")
 
 
 def get_interview_rating_for_user(application, user, stage=None):
-    interview_session = get_interview_session(application, stage=stage)
-    if not interview_session:
-        return None
-    return interview_session.ratings.select_related("rated_by").filter(rated_by=user).first()
+    review_stage = stage or get_current_review_stage(application)
+    return application.interview_ratings.select_related(
+        "interview_session",
+    ).filter(review_stage=review_stage, rated_by=user).first()
+
+
+def get_interview_fallback_evidence(application, stage=None):
+    case = getattr(application, "case", None)
+    if case is None:
+        return EvidenceVaultItem.objects.none()
+    queryset = EvidenceVaultItem.objects.select_related(
+        "uploaded_by",
+        "recruitment_case",
+    ).filter(
+        artifact_scope=EvidenceVaultItem.OwnerScope.CASE,
+        artifact_type=ARTIFACT_TYPE_INTERVIEW_FALLBACK,
+        recruitment_case=case,
+    )
+    if stage:
+        queryset = queryset.filter(stage=stage)
+    return queryset.order_by("created_at")
 
 
 def user_can_manage_interview_session(user, application):
@@ -594,15 +947,6 @@ def get_deliberation_records(application):
     ).order_by("created_at")
 
 
-def get_comparative_assessment_report(application, stage=None):
-    review_stage = stage or get_current_review_stage(application)
-    return application.comparative_assessment_reports.select_related(
-        "generated_by",
-        "finalized_by",
-        "evidence_item",
-    ).filter(review_stage=review_stage).first()
-
-
 def get_latest_finalized_deliberation_record(application):
     return application.deliberation_records.select_related(
         "recorded_by",
@@ -612,27 +956,64 @@ def get_latest_finalized_deliberation_record(application):
     ).filter(is_finalized=True).order_by("-finalized_at", "-created_at").first()
 
 
-def get_latest_finalized_comparative_assessment_report(application):
-    return application.comparative_assessment_reports.select_related(
+def user_can_manage_deliberation(user, application):
+    current_stage = get_current_review_stage(application)
+    expected_stage = DELIBERATION_STAGES_BY_BRANCH.get(application.branch)
+    if current_stage != expected_stage:
+        return False
+    if user.role not in DELIBERATION_ROLES_BY_BRANCH.get(application.branch, set()):
+        return False
+    return user_can_process_application(user, application)
+
+
+def get_comparative_assessment_report(application, stage=None):
+    review_stage = stage or get_current_review_stage(application)
+    queryset = ComparativeAssessmentReport.objects.select_related(
         "generated_by",
         "finalized_by",
         "evidence_item",
-    ).filter(is_finalized=True).order_by("-finalized_at", "-updated_at", "-created_at").first()
+    ).filter(
+        recruitment_entry=application.position,
+        review_stage=review_stage,
+    ).order_by(
+        "-version_number",
+        "-is_finalized",
+        "-finalized_at",
+        "-created_at",
+    )
+    return queryset.first()
+
+
+def get_latest_finalized_comparative_assessment_report(application):
+    return ComparativeAssessmentReport.objects.select_related(
+        "generated_by",
+        "finalized_by",
+        "evidence_item",
+    ).filter(
+        recruitment_entry=application.position,
+        is_finalized=True,
+    ).order_by("-version_number", "-finalized_at", "-created_at").first()
 
 
 def get_comparative_assessment_report_items_for_report(report):
     if not report:
         return ComparativeAssessmentReportItem.objects.none()
     return report.items.select_related(
-        "application",
         "recruitment_case",
+        "recruitment_case__application",
         "deliberation_record",
     ).order_by("rank_order", "created_at")
 
 
-def get_comparative_assessment_report_items(application, stage=None):
-    report = get_comparative_assessment_report(application, stage=stage)
-    return get_comparative_assessment_report_items_for_report(report)
+def user_can_manage_comparative_assessment_report(user, application):
+    current_stage = get_current_review_stage(application)
+    if application.branch != PositionPosting.Branch.PLANTILLA:
+        return False
+    if current_stage != CAR_REVIEW_STAGE:
+        return False
+    if user.role not in CAR_MANAGER_ROLES:
+        return False
+    return user_can_process_application(user, application)
 
 
 def get_final_decision_history(application):
@@ -647,34 +1028,47 @@ def get_latest_final_decision(application):
     return get_final_decision_history(application).first()
 
 
-def user_can_manage_deliberation(user, application):
-    current_stage = get_current_review_stage(application)
-    expected_stage = DELIBERATION_STAGES_BY_BRANCH.get(application.branch, "")
-    allowed_roles = DELIBERATION_ROLES_BY_BRANCH.get(application.branch, set())
-    if current_stage != expected_stage or user.role not in allowed_roles:
-        return False
-    return user_can_process_application(user, application)
-
-
-def user_can_manage_comparative_assessment_report(user, application):
-    current_stage = get_current_review_stage(application)
-    if (
-        application.branch != PositionPosting.Branch.PLANTILLA
-        or current_stage != CAR_REVIEW_STAGE
-        or user.role not in CAR_MANAGER_ROLES
-    ):
-        return False
-    return user_can_process_application(user, application)
-
-
 def user_can_record_final_decision(user, application):
     current_stage = get_current_review_stage(application)
+    if current_stage != RecruitmentCase.Stage.APPOINTING_AUTHORITY_REVIEW:
+        return False
+    if user.role != RecruitmentUser.Role.APPOINTING_AUTHORITY:
+        return False
+    return user_can_process_application(user, application)
+
+
+def get_completion_record(application):
+    return CompletionRecord.objects.select_related(
+        "tracked_by",
+        "recruitment_case",
+    ).filter(application=application).first()
+
+
+def get_completion_requirements(application):
+    completion_record = get_completion_record(application)
+    if not completion_record:
+        return CompletionRequirement.objects.none()
+    return completion_record.requirements.all()
+
+
+def user_can_manage_completion(user, application):
+    current_stage = get_current_review_stage(application)
     if (
-        user.role != RecruitmentUser.Role.APPOINTING_AUTHORITY
-        or current_stage != RecruitmentCase.Stage.APPOINTING_AUTHORITY_REVIEW
+        user.role not in COMPLETION_REVIEW_ROLES
+        or current_stage not in COMPLETION_STAGES
+        or application.status != RecruitmentApplication.Status.APPROVED
     ):
         return False
     return user_can_process_application(user, application)
+
+
+def user_can_close_case(user, application):
+    completion_record = get_completion_record(application)
+    return bool(
+        completion_record
+        and user_can_manage_completion(user, application)
+        and completion_record.requirements_ready_for_closure
+    )
 
 
 def _decision_packet_screening_record(record):
@@ -761,13 +1155,60 @@ def _decision_packet_deliberation_record(record):
     }
 
 
+def get_evidence_items_for_application_context(application):
+    return (
+        EvidenceVaultItem.objects.select_related(
+            "application",
+            "application__position",
+            "recruitment_case",
+            "recruitment_case__application",
+            "recruitment_case__application__position",
+            "recruitment_entry",
+            "uploaded_by",
+            "previous_version",
+        )
+        .filter(_evidence_context_filter_for_application(application))
+        .order_by("artifact_scope", "stage", "document_key", "version_number", "created_at", "id")
+    )
+
+
+def _evidence_owner_filters(*, application=None, recruitment_case=None, recruitment_entry=None):
+    owner_count = sum(bool(owner is not None) for owner in [application, recruitment_case, recruitment_entry])
+    if owner_count != 1:
+        raise ValueError(
+            "Evidence ownership must target exactly one scope: application, recruitment case, or recruitment entry."
+        )
+    if application is not None:
+        return {
+            "artifact_scope": EvidenceVaultItem.OwnerScope.APPLICATION,
+            "application": application,
+            "recruitment_case": None,
+            "recruitment_entry": None,
+        }
+    if recruitment_case is not None:
+        return {
+            "artifact_scope": EvidenceVaultItem.OwnerScope.CASE,
+            "application": None,
+            "recruitment_case": recruitment_case,
+            "recruitment_entry": None,
+        }
+    return {
+        "artifact_scope": EvidenceVaultItem.OwnerScope.ENTRY,
+        "application": None,
+        "recruitment_case": None,
+        "recruitment_entry": recruitment_entry,
+    }
+
+
 def _decision_packet_car_item(item):
+    application = item.application
     return {
         "id": item.id,
         "rank_order": item.rank_order,
-        "application_id": item.application_id,
-        "application_reference": item.application.reference_number or "",
-        "applicant_name": item.application.applicant_display_name,
+        "recruitment_case_id": item.recruitment_case_id,
+        "application_id": application.id,
+        "application_reference": application.reference_number or "",
+        "applicant_name": application.applicant_display_name,
         "qualification_outcome": item.qualification_outcome,
         "exam_status": item.exam_status,
         "exam_score": _decimal_string(item.exam_score),
@@ -786,13 +1227,14 @@ def _decision_packet_car_report(report):
         "generated_by": str(report.generated_by) if report.generated_by else "",
         "generated_by_role": report.generated_by_role,
         "summary_notes": report.summary_notes,
-        "generation_count": report.generation_count,
+        "version_number": report.version_number,
         "candidate_count": len(items),
         "finalized_at": report.finalized_at.isoformat() if report.finalized_at else "",
         "evidence_item": (
             {
                 "id": evidence.id,
                 "label": evidence.label,
+                "artifact_scope": evidence.artifact_scope,
                 "original_filename": evidence.original_filename,
                 "sha256_digest": evidence.sha256_digest,
             }
@@ -805,16 +1247,31 @@ def _decision_packet_car_report(report):
 
 
 def _decision_packet_evidence_reference(evidence):
+    application = evidence.owning_application
+    recruitment_case = evidence.owning_case
+    recruitment_entry = evidence.owning_recruitment_entry
     return {
         "id": evidence.id,
         "label": evidence.label,
-        "document_type": evidence.document_type,
-        "document_type_label": evidence.get_document_type_display() if evidence.document_type else "",
-        "workflow_stage": evidence.workflow_stage,
-        "workflow_stage_label": evidence.get_workflow_stage_display() if evidence.workflow_stage else "",
+        "artifact_scope": evidence.artifact_scope,
+        "artifact_scope_label": evidence.get_artifact_scope_display(),
+        "artifact_type": evidence.artifact_type,
+        "application_id": application.id if application else None,
+        "recruitment_case_id": recruitment_case.id if recruitment_case else None,
+        "recruitment_entry_id": recruitment_entry.id if recruitment_entry else None,
+        "stage": evidence.stage,
+        "stage_label": evidence.get_stage_display() if evidence.stage else "",
+        "document_key": evidence.document_key,
+        "version_family": str(evidence.version_family),
+        "version_number": evidence.version_number,
+        "is_current_version": evidence.is_current_version,
+        "is_archived": evidence.is_archived,
+        "archive_tag": evidence.archive_tag,
         "original_filename": evidence.original_filename,
-        "sha256_digest": evidence.sha256_digest,
+        "uploaded_by_role": evidence.uploaded_by_role,
         "uploaded_at": evidence.created_at.isoformat(),
+        "digest_algorithm": evidence.digest_algorithm,
+        "sha256_digest": evidence.sha256_digest,
     }
 
 
@@ -840,20 +1297,12 @@ def build_submission_packet(application):
     )
     deliberation_record = get_latest_finalized_deliberation_record(application)
     comparative_assessment_report = get_latest_finalized_comparative_assessment_report(application)
-    evidence_items = list(
-        application.evidence_items.select_related(
-            "uploaded_by",
-            "recruitment_case",
-        ).order_by("created_at")
-    )
+    evidence_items = list(get_evidence_items_for_application_context(application))
 
     missing_components = []
     if not deliberation_record:
         missing_components.append("Finalized deliberation record")
-    if (
-        application.branch == PositionPosting.Branch.PLANTILLA
-        and not comparative_assessment_report
-    ):
+    if application.branch == PositionPosting.Branch.PLANTILLA and not comparative_assessment_report:
         missing_components.append("Finalized Comparative Assessment Report")
 
     preserved_artifact_ids = {
@@ -1214,8 +1663,8 @@ def upload_interview_fallback_rating(application, actor, uploaded_file, remarks)
         actor=actor,
         label=f"{INTERVIEW_FALLBACK_LABEL} - {application.case.get_current_stage_display()}",
         uploaded_file=uploaded_file,
-        recruitment_case=application.case,
-        workflow_stage=review_stage,
+        artifact_scope=EvidenceVaultItem.OwnerScope.CASE,
+        artifact_type=ARTIFACT_TYPE_INTERVIEW_FALLBACK,
     )
     record_audit_event(
         application=application,
@@ -1404,7 +1853,9 @@ def generate_comparative_assessment_report(application, actor, cleaned_data, fin
 
     review_stage = application.case.current_stage
     if review_stage != CAR_REVIEW_STAGE or application.branch != PositionPosting.Branch.PLANTILLA:
-        raise ValueError("Comparative Assessment Report generation is only available for Plantilla cases at the HRMPSB stage.")
+        raise ValueError(
+            "Comparative Assessment Report generation is only available for Plantilla cases at the HRMPSB stage."
+        )
 
     deliberation_record = get_deliberation_record(application, stage=review_stage)
     if not deliberation_record or not deliberation_record.is_finalized:
@@ -1412,12 +1863,9 @@ def generate_comparative_assessment_report(application, actor, cleaned_data, fin
             "Finalize the deliberation record before generating the Comparative Assessment Report."
         )
 
-    report = get_comparative_assessment_report(application, stage=review_stage)
-    if report and report.is_finalized:
-        raise ValueError("Finalized Comparative Assessment Reports are locked and cannot be modified.")
-
     candidate_rows = _car_candidate_rows(application.position, review_stage)
-    generation_number = (report.generation_count + 1) if report else 1
+    latest_report = get_comparative_assessment_report(application, stage=review_stage)
+    version_number = (latest_report.version_number + 1) if latest_report else 1
     consolidated_snapshot = {
         "generated_at": timezone.now().isoformat(),
         "entry_code": application.position.job_code,
@@ -1441,54 +1889,43 @@ def generate_comparative_assessment_report(application, actor, cleaned_data, fin
         application=application,
         actor=actor,
         candidate_rows=candidate_rows,
-        generation_number=generation_number,
+        generation_number=version_number,
         summary_notes=cleaned_data["summary_notes"],
     )
     evidence = store_generated_evidence_item(
         application=application,
         actor=actor,
         label=f"{CAR_LABEL} - {application.case.get_current_stage_display()}",
-        filename=f"{application.position.job_code.lower()}-{review_stage.replace('_', '-')}-car-v{generation_number}.pdf",
+        filename=f"{application.position.job_code.lower()}-{review_stage.replace('_', '-')}-car-v{version_number}.pdf",
         raw_bytes=pdf_bytes,
         content_type="application/pdf",
-        recruitment_case=application.case,
-        workflow_stage=review_stage,
+        recruitment_entry=application.position,
+        artifact_scope=EvidenceVaultItem.OwnerScope.ENTRY,
+        artifact_type=ARTIFACT_TYPE_COMPARATIVE_ASSESSMENT_REPORT,
+        stage=review_stage,
+        document_key=ARTIFACT_TYPE_COMPARATIVE_ASSESSMENT_REPORT,
     )
 
-    created = report is None
-    if report is None:
-        report = ComparativeAssessmentReport(
-            application=application,
-            recruitment_case=application.case,
-            recruitment_entry=application.position,
-            review_stage=review_stage,
-            generated_by=actor,
-            branch=application.branch,
-        )
-
-    report.application = application
-    report.recruitment_case = application.case
-    report.recruitment_entry = application.position
-    report.generated_by = actor
-    report.summary_notes = cleaned_data["summary_notes"]
-    report.consolidated_snapshot = consolidated_snapshot
-    report.generation_count = generation_number
-    report.evidence_item = evidence
-    report.is_finalized = finalize
+    report = ComparativeAssessmentReport(
+        recruitment_entry=application.position,
+        review_stage=review_stage,
+        generated_by=actor,
+        branch=application.branch,
+        summary_notes=cleaned_data["summary_notes"],
+        consolidated_snapshot=consolidated_snapshot,
+        version_number=version_number,
+        evidence_item=evidence,
+        is_finalized=finalize,
+    )
     if finalize:
         report.finalized_by = actor
         report.finalized_at = timezone.now()
-    else:
-        report.finalized_by = None
-        report.finalized_at = None
     report.full_clean()
     report.save()
 
-    report.items.all().delete()
     for row in candidate_rows:
         item = ComparativeAssessmentReportItem(
             report=report,
-            application=row["application"],
             recruitment_case=row["recruitment_case"],
             deliberation_record=row["deliberation_record"],
             rank_order=row["rank_order"],
@@ -1514,9 +1951,8 @@ def generate_comparative_assessment_report(application, actor, cleaned_data, fin
         ),
         metadata={
             "car_report_id": report.id,
-            "created": created,
             "review_stage": review_stage,
-            "generation_count": report.generation_count,
+            "version_number": report.version_number,
             "candidate_count": len(candidate_rows),
             "evidence_id": evidence.id,
             "is_finalized": report.is_finalized,
@@ -1526,85 +1962,101 @@ def generate_comparative_assessment_report(application, actor, cleaned_data, fin
 
 
 @transaction.atomic
-def record_final_decision(application, actor, cleaned_data):
+def save_completion_tracking(application, actor, cleaned_data, requirement_formset):
     if not hasattr(application, "case"):
-        raise ValueError("A recruitment case must exist before a final decision can be recorded.")
-    if application.case.is_stage_locked:
-        raise ValueError("This recruitment case is stage-locked. Use controlled reopen before proceeding.")
-    if not user_can_record_final_decision(actor, application):
+        raise ValueError("A recruitment case must exist before completion tracking can be recorded.")
+    if not user_can_manage_completion(actor, application):
         raise ValueError(
-            "Only the Appointing Authority may record the final decision at the current workflow stage."
-        )
-    if application.case.current_stage != RecruitmentCase.Stage.APPOINTING_AUTHORITY_REVIEW:
-        raise ValueError(
-            "Final decisions may only be recorded during the Appointing Authority review stage."
+            "You cannot manage completion tracking for this application at its current workflow stage."
         )
 
-    submission_packet = build_submission_packet(application)
-    missing_components = submission_packet["summary"]["missing_components"]
-    if missing_components:
-        raise ValueError(
-            "Submission packet is incomplete for final decision recording. Missing: "
-            + "; ".join(missing_components)
-            + "."
+    completion_record = get_completion_record(application)
+    created = completion_record is None
+    if completion_record is None:
+        completion_record = CompletionRecord(
+            application=application,
+            recruitment_case=application.case,
+            tracked_by=actor,
         )
 
-    decision = FinalDecision(
-        application=application,
-        recruitment_case=application.case,
-        recruitment_entry=application.position,
-        review_stage=RecruitmentCase.Stage.APPOINTING_AUTHORITY_REVIEW,
-        decided_by=actor,
-        branch=application.branch,
-        level=application.level,
-        decision_outcome=cleaned_data["decision_outcome"],
-        decision_notes=cleaned_data["decision_notes"],
-        submission_packet_snapshot=submission_packet,
-    )
-    decision.full_clean()
-    decision.save()
+    completion_record.recruitment_case = application.case
+    completion_record.tracked_by = actor
+    completion_record.branch = application.branch
+    completion_record.level = application.level
+    completion_record.completion_reference = cleaned_data.get("completion_reference", "")
+    completion_record.completion_date = cleaned_data.get("completion_date")
+    completion_record.deadline = cleaned_data.get("deadline")
+    completion_record.remarks = cleaned_data.get("remarks", "")
+    if application.branch == PositionPosting.Branch.PLANTILLA:
+        completion_record.announcement_reference = cleaned_data.get("announcement_reference", "")
+        completion_record.announcement_date = cleaned_data.get("announcement_date")
+    else:
+        completion_record.announcement_reference = ""
+        completion_record.announcement_date = None
+    completion_record.full_clean()
+    completion_record.save()
 
-    next_status = FINAL_DECISION_OUTCOME_TO_STATUS[decision.decision_outcome]
-    previous_role = application.current_handler_role
-    previous_status = application.status
-    case_transition = _sync_case_after_workflow_action(
-        application=application,
-        actor=actor,
-        next_role="",
-        next_status=next_status,
-        remarks=decision.decision_notes,
-    )
-    application.current_handler_role = ""
-    application.status = next_status
-    application.closed_at = timezone.now()
-    application.save(update_fields=["current_handler_role", "status", "closed_at", "updated_at"])
+    active_requirement_ids = []
+    requirement_count = 0
+    resolved_requirement_count = 0
+    for form in requirement_formset.forms:
+        if not hasattr(form, "cleaned_data") or not form.cleaned_data:
+            continue
+        if form.cleaned_data.get("DELETE"):
+            if form.instance.pk:
+                form.instance.delete()
+            continue
+        item_label = (form.cleaned_data.get("item_label") or "").strip()
+        if not item_label:
+            continue
+
+        requirement = form.save(commit=False)
+        requirement.completion_record = completion_record
+        requirement.display_order = requirement_count
+        requirement.full_clean()
+        requirement.save()
+        active_requirement_ids.append(requirement.pk)
+        requirement_count += 1
+        if requirement.status != CompletionRequirement.RequirementStatus.PENDING:
+            resolved_requirement_count += 1
+
+    completion_record.requirements.exclude(pk__in=active_requirement_ids).delete()
+
+    if requirement_count == 0:
+        raise ValidationError("Add at least one completion requirement item.")
 
     record_audit_event(
         application=application,
         actor=actor,
-        action=AuditLog.Action.DECISION_RECORDED,
+        action=AuditLog.Action.COMPLETION_RECORDED,
         description=(
-            "Final decision recorded as selected by the Appointing Authority."
-            if decision.is_selected
-            else "Final decision recorded as not selected by the Appointing Authority."
+            "Saved appointment completion tracking."
+            if application.branch == PositionPosting.Branch.PLANTILLA
+            else "Saved contract completion tracking."
         ),
         metadata={
-            "final_decision_id": decision.id,
-            "decision_outcome": decision.decision_outcome,
-            "decision_notes": decision.decision_notes,
-            "from_status": previous_status,
-            "to_status": next_status,
-            "from_role": previous_role,
-            "to_role": "",
-            "from_stage": case_transition["previous_stage"],
-            "to_stage": application.case.current_stage,
-            "from_case_status": case_transition["previous_case_status"],
-            "to_case_status": application.case.case_status,
-            "case_locked": application.case.is_stage_locked,
-            "preserved_artifact_ids": submission_packet["preserved_artifact_ids"],
+            "completion_record_id": completion_record.id,
+            "created": created,
+            "case_stage": application.case.current_stage,
+            "case_status": application.case.case_status,
+            "deadline": completion_record.deadline.isoformat() if completion_record.deadline else "",
+            "completion_reference": completion_record.completion_reference,
+            "completion_date": (
+                completion_record.completion_date.isoformat()
+                if completion_record.completion_date
+                else ""
+            ),
+            "announcement_reference": completion_record.announcement_reference,
+            "announcement_date": (
+                completion_record.announcement_date.isoformat()
+                if completion_record.announcement_date
+                else ""
+            ),
+            "requirement_count": requirement_count,
+            "resolved_requirement_count": resolved_requirement_count,
         },
     )
-    return decision
+    return completion_record
 
 
 def _upsert_recruitment_case_for_submission(application, actor, next_role, next_status):
@@ -1645,7 +2097,7 @@ def _upsert_recruitment_case_for_submission(application, actor, next_role, next_
                 "reopened_at",
                 "updated_at",
             ]
-        )
+      )
     record_audit_event(
         application=application,
         actor=actor,
@@ -1677,12 +2129,20 @@ def _sync_case_after_workflow_action(application, actor, next_role, next_status,
         case.locked_stage = previous_stage
         case.closed_at = None
     elif next_status == RecruitmentApplication.Status.APPROVED:
-        case.current_stage = RecruitmentCase.Stage.CLOSED
-        case.case_status = RecruitmentCase.CaseStatus.APPROVED
-        case.current_handler_role = ""
-        case.is_stage_locked = True
-        case.locked_stage = previous_stage
-        case.closed_at = timezone.now()
+        if next_role:
+            case.current_stage = RecruitmentCase.Stage.COMPLETION
+            case.case_status = RecruitmentCase.CaseStatus.ACTIVE
+            case.current_handler_role = next_role
+            case.is_stage_locked = False
+            case.locked_stage = ""
+            case.closed_at = None
+        else:
+            case.current_stage = RecruitmentCase.Stage.CLOSED
+            case.case_status = RecruitmentCase.CaseStatus.APPROVED
+            case.current_handler_role = ""
+            case.is_stage_locked = True
+            case.locked_stage = previous_stage
+            case.closed_at = timezone.now()
     elif next_status == RecruitmentApplication.Status.REJECTED:
         case.current_stage = RecruitmentCase.Stage.CLOSED
         case.case_status = RecruitmentCase.CaseStatus.REJECTED
@@ -1725,6 +2185,10 @@ def _build_portal_applicant_username():
     return f"portal-{uuid.uuid4().hex[:12]}"
 
 
+def normalize_applicant_email(email):
+    return (email or "").strip().lower()
+
+
 def create_portal_applicant_identity(first_name, last_name, email, phone):
     applicant = RecruitmentUser(
         username=_build_portal_applicant_username(),
@@ -1741,21 +2205,69 @@ def create_portal_applicant_identity(first_name, last_name, email, phone):
     return applicant
 
 
-def _missing_required_documents_message(application):
-    missing_documents = application.missing_required_document_labels
-    if not missing_documents:
-        return ""
+def get_reusable_public_application_draft(entry, applicant_email):
     return (
-        "Upload all required documents before proceeding. Missing: "
-        + "; ".join(missing_documents)
-        + "."
+        RecruitmentApplication.objects.select_related("applicant", "position")
+        .filter(
+            position=entry,
+            applicant_email__iexact=applicant_email,
+            submitted_at__isnull=True,
+            status=RecruitmentApplication.Status.DRAFT,
+        )
+        .order_by("-updated_at", "-created_at")
+        .first()
     )
 
 
-def ensure_application_document_completeness(application):
-    if application.has_complete_required_documents:
-        return application
-    raise ValueError(_missing_required_documents_message(application))
+def get_portal_applicant_identity_by_email(applicant_email):
+    return (
+        RecruitmentUser.objects.filter(
+            role=RecruitmentUser.Role.APPLICANT,
+            email__iexact=applicant_email,
+        )
+        .order_by("-is_active", "id")
+        .first()
+    )
+
+
+def _sync_portal_applicant_identity(applicant, *, first_name, last_name, email):
+    changed_fields = []
+    if applicant.first_name != first_name:
+        applicant.first_name = first_name
+        changed_fields.append("first_name")
+    if applicant.last_name != last_name:
+        applicant.last_name = last_name
+        changed_fields.append("last_name")
+    if normalize_applicant_email(applicant.email) != email:
+        applicant.email = email
+        changed_fields.append("email")
+    if not applicant.is_active and applicant.office_name != "Public Applicant":
+        applicant.office_name = "Public Applicant"
+        changed_fields.append("office_name")
+    if not applicant.is_active and applicant.employee_id:
+        applicant.employee_id = ""
+        changed_fields.append("employee_id")
+    if changed_fields:
+        applicant.save(update_fields=changed_fields)
+    return applicant
+
+
+def get_missing_required_applicant_document_requirements(application):
+    present_document_codes = set(
+        EvidenceVaultItem.objects.filter(
+            application=application,
+            artifact_scope=EvidenceVaultItem.OwnerScope.APPLICATION,
+            artifact_type=ARTIFACT_TYPE_APPLICANT_DOCUMENT,
+            stage=EvidenceVaultItem.Stage.APPLICANT_INTAKE,
+            is_current_version=True,
+            is_archived=False,
+        ).values_list("document_key", flat=True)
+    )
+    return [
+        requirement
+        for requirement in get_required_applicant_document_requirements()
+        if requirement.code not in present_document_codes
+    ]
 
 
 def _hash_application_otp(application, otp_code):
@@ -1777,7 +2289,6 @@ def _generate_otp_code():
 def issue_application_otp(application, actor=None):
     if application.status != RecruitmentApplication.Status.DRAFT:
         raise ValueError("OTP can only be issued while the application is still in draft.")
-    ensure_application_document_completeness(application)
 
     otp_code = _generate_otp_code()
     now = timezone.now()
@@ -1839,11 +2350,11 @@ def verify_application_otp(application, otp_code, actor=None):
 
 
 @transaction.atomic
-def create_public_application_draft(entry, cleaned_data, uploaded_documents):
+def create_public_application_draft(entry, cleaned_data, requirement_uploads):
     if not entry.is_open_for_intake:
         raise ValueError("The selected recruitment entry is not currently open for intake.")
 
-    applicant_email = cleaned_data["email"].lower()
+    applicant_email = normalize_applicant_email(cleaned_data["email"])
     if RecruitmentApplication.objects.filter(
         position=entry,
         applicant_email__iexact=applicant_email,
@@ -1853,47 +2364,75 @@ def create_public_application_draft(entry, cleaned_data, uploaded_documents):
             "An application for this recruitment entry has already been submitted using this email address."
         )
 
-    applicant_user = create_portal_applicant_identity(
-        first_name=cleaned_data["first_name"],
-        last_name=cleaned_data["last_name"],
-        email=applicant_email,
-        phone=cleaned_data["phone"],
-    )
-    application = RecruitmentApplication.objects.create(
-        applicant=applicant_user,
-        position=entry,
-        qualification_summary=cleaned_data["qualification_summary"],
-        cover_letter=cleaned_data["cover_letter"],
-        applicant_first_name=cleaned_data["first_name"],
-        applicant_last_name=cleaned_data["last_name"],
-        applicant_email=applicant_email,
-        applicant_phone=cleaned_data["phone"],
-        checklist_privacy_consent=cleaned_data["checklist_privacy_consent"],
-        checklist_documents_complete=cleaned_data["checklist_documents_complete"],
-        checklist_information_certified=cleaned_data["checklist_information_certified"],
-        performance_rating_not_applicable=cleaned_data["performance_rating_not_applicable"],
-    )
-    for requirement in get_applicant_document_requirements():
-        uploaded_file = uploaded_documents.get(requirement.code)
-        if not uploaded_file:
-            continue
+    application = get_reusable_public_application_draft(entry, applicant_email)
+    created = application is None
+    if application is None:
+        applicant_user = get_portal_applicant_identity_by_email(applicant_email)
+        if applicant_user is None:
+            applicant_user = create_portal_applicant_identity(
+                first_name=cleaned_data["first_name"],
+                last_name=cleaned_data["last_name"],
+                email=applicant_email,
+                phone=cleaned_data["phone"],
+            )
+        else:
+            _sync_portal_applicant_identity(
+                applicant_user,
+                first_name=cleaned_data["first_name"],
+                last_name=cleaned_data["last_name"],
+                email=applicant_email,
+            )
+        application = RecruitmentApplication(applicant=applicant_user, position=entry)
+    else:
+        applicant_user = application.applicant
+        _sync_portal_applicant_identity(
+            applicant_user,
+            first_name=cleaned_data["first_name"],
+            last_name=cleaned_data["last_name"],
+            email=applicant_email,
+        )
+
+    application.applicant = applicant_user
+    application.position = entry
+    application.status = RecruitmentApplication.Status.DRAFT
+    application.current_handler_role = ""
+    application.qualification_summary = cleaned_data["qualification_summary"]
+    application.cover_letter = cleaned_data["cover_letter"]
+    application.applicant_first_name = cleaned_data["first_name"]
+    application.applicant_last_name = cleaned_data["last_name"]
+    application.applicant_email = applicant_email
+    application.applicant_phone = cleaned_data["phone"]
+    application.checklist_privacy_consent = cleaned_data["checklist_privacy_consent"]
+    application.checklist_documents_complete = cleaned_data["checklist_documents_complete"]
+    application.checklist_information_certified = cleaned_data["checklist_information_certified"]
+    application.submission_hash = ""
+    application.submitted_at = None
+    application.closed_at = None
+    application.save()
+    for requirement_code, uploaded_file in requirement_uploads.items():
+        requirement = APPLICANT_DOCUMENT_REQUIREMENTS_BY_CODE[requirement_code]
         upload_evidence_item(
             application=application,
             actor=applicant_user,
             label=requirement.title,
             uploaded_file=uploaded_file,
-            document_type=requirement.code,
+            document_key=requirement.code,
+            artifact_scope=EvidenceVaultItem.OwnerScope.APPLICATION,
+            artifact_type=ARTIFACT_TYPE_APPLICANT_DOCUMENT,
         )
-    ensure_application_document_completeness(application)
     record_audit_event(
         application=application,
         actor=applicant_user,
-        action=AuditLog.Action.APPLICATION_CREATED,
-        description="Applicant created an accountless application draft.",
+        action=AuditLog.Action.APPLICATION_CREATED if created else AuditLog.Action.APPLICATION_UPDATED,
+        description=(
+            "Applicant created an accountless application draft."
+            if created
+            else "Applicant reused and refreshed an existing accountless application draft."
+        ),
         metadata={
             "public_token": str(application.public_token),
-            "document_count": len(uploaded_documents),
-            "performance_rating_not_applicable": application.performance_rating_not_applicable,
+            "reused_draft": not created,
+            "applicant_identity_id": applicant_user.id,
         },
     )
     issue_application_otp(application, actor=applicant_user)
@@ -1910,15 +2449,31 @@ def encrypt_evidence_bytes(raw_bytes):
     return nonce, cipher.encrypt(nonce, raw_bytes, None)
 
 
-def decrypt_evidence_bytes(evidence, actor):
+def _decrypt_evidence_bytes(evidence):
     cipher = AESGCM(_get_aes_key())
-    plaintext = cipher.decrypt(bytes(evidence.nonce), bytes(evidence.ciphertext), None)
+    return cipher.decrypt(bytes(evidence.nonce), bytes(evidence.ciphertext), None)
+
+
+def decrypt_evidence_bytes(evidence, actor):
+    context_application = get_evidence_context_application_for_user(actor, evidence)
+    if context_application is None:
+        raise ValueError("You cannot access this evidence item.")
+    plaintext = _decrypt_evidence_bytes(evidence)
     record_audit_event(
-        application=evidence.application,
+        application=context_application,
         actor=actor,
         action=AuditLog.Action.EVIDENCE_DOWNLOADED,
-        description=f"Downloaded evidence '{evidence.label}'.",
-        metadata={"evidence_id": evidence.id, "filename": evidence.original_filename},
+        description=f"Downloaded evidence '{evidence.label}' {evidence.version_label}.",
+        metadata={
+            "evidence_id": evidence.id,
+            "filename": evidence.original_filename,
+            "stage": evidence.stage,
+            "artifact_scope": evidence.artifact_scope,
+            "artifact_type": evidence.artifact_type,
+            "version_family": str(evidence.version_family),
+            "version_number": evidence.version_number,
+            "is_archived": evidence.is_archived,
+        },
     )
     return plaintext
 
@@ -1930,67 +2485,248 @@ def store_generated_evidence_item(
     filename,
     raw_bytes,
     content_type="",
-    document_type="",
+    artifact_type="",
+    artifact_scope=EvidenceVaultItem.OwnerScope.APPLICATION,
     recruitment_case=None,
-    workflow_stage="",
+    recruitment_entry=None,
+    stage="",
+    document_key="",
 ):
-    if recruitment_case and recruitment_case.application_id != application.id:
-        raise ValueError("Evidence must stay linked to the recruitment case of the same application.")
+    if artifact_scope == EvidenceVaultItem.OwnerScope.CASE and recruitment_case is None:
+        raise ValueError("Case-owned generated evidence must point to a recruitment case.")
+    if artifact_scope == EvidenceVaultItem.OwnerScope.ENTRY and recruitment_entry is None:
+        raise ValueError("Entry-owned generated evidence must point to a recruitment entry.")
+    owner_kwargs = _evidence_owner_filters(
+        application=application if artifact_scope == EvidenceVaultItem.OwnerScope.APPLICATION else None,
+        recruitment_case=(
+            recruitment_case if artifact_scope == EvidenceVaultItem.OwnerScope.CASE else None
+        ),
+        recruitment_entry=(
+            recruitment_entry if artifact_scope == EvidenceVaultItem.OwnerScope.ENTRY else None
+        ),
+    )
+    if (
+        owner_kwargs["artifact_scope"] == EvidenceVaultItem.OwnerScope.CASE
+        and owner_kwargs["recruitment_case"].application_id != application.id
+    ):
+        raise ValueError("Case-owned evidence must stay linked to the recruitment case of the same application.")
+    if (
+        owner_kwargs["artifact_scope"] == EvidenceVaultItem.OwnerScope.ENTRY
+        and owner_kwargs["recruitment_entry"].id != application.position_id
+    ):
+        raise ValueError("Entry-owned evidence must stay linked to the same recruitment entry as the application.")
+    if not stage:
+        stage = _evidence_stage_for_application(application)
     sha256_digest = hashlib.sha256(raw_bytes).hexdigest()
     nonce, ciphertext = encrypt_evidence_bytes(raw_bytes)
-    evidence = EvidenceVaultItem.objects.create(
-        application=application,
-        recruitment_case=recruitment_case,
-        workflow_stage=workflow_stage,
+    document_key = document_key or EvidenceVaultItem.build_document_key(label)
+    previous_version = EvidenceVaultItem.objects.filter(
+        artifact_scope=owner_kwargs["artifact_scope"],
+        application=owner_kwargs["application"],
+        recruitment_case=owner_kwargs["recruitment_case"],
+        recruitment_entry=owner_kwargs["recruitment_entry"],
+        stage=stage,
+        document_key=document_key,
+        is_current_version=True,
+    ).order_by("-version_number", "-created_at").first()
+    version_family = previous_version.version_family if previous_version else uuid.uuid4()
+    version_number = previous_version.version_number + 1 if previous_version else 1
+    evidence = EvidenceVaultItem(
+        application=owner_kwargs["application"],
+        recruitment_case=owner_kwargs["recruitment_case"],
+        recruitment_entry=owner_kwargs["recruitment_entry"],
+        artifact_scope=owner_kwargs["artifact_scope"],
+        artifact_type=artifact_type or ARTIFACT_TYPE_WORKFLOW_EVIDENCE,
+        stage=stage,
         uploaded_by=actor,
+        uploaded_by_role=getattr(actor, "role", ""),
         label=label,
-        document_type=document_type,
+        document_key=document_key,
+        version_family=version_family,
+        version_number=version_number,
+        previous_version=previous_version,
+        is_current_version=True,
         original_filename=filename,
         content_type=content_type or "",
         size_bytes=len(raw_bytes),
+        digest_algorithm="sha256",
         sha256_digest=sha256_digest,
         nonce=nonce,
         ciphertext=ciphertext,
     )
+    evidence.full_clean()
+    evidence.save()
+    if previous_version:
+        previous_version.is_current_version = False
+        previous_version.save(update_fields=["is_current_version", "updated_at"])
     record_audit_event(
         application=application,
         actor=actor,
         action=AuditLog.Action.EVIDENCE_UPLOADED,
-        description=f"Uploaded evidence '{label}'.",
+        description=f"Uploaded evidence '{label}' {evidence.version_label}.",
         metadata={
             "evidence_id": evidence.id,
+            "artifact_scope": evidence.artifact_scope,
+            "artifact_type": evidence.artifact_type,
+            "case_id": evidence.recruitment_case_id,
+            "entry_id": evidence.recruitment_entry_id,
+            "stage": evidence.stage,
+            "document_key": evidence.document_key,
+            "version_family": str(evidence.version_family),
+            "version_number": evidence.version_number,
+            "previous_version_id": previous_version.id if previous_version else None,
             "sha256": sha256_digest,
-            "document_type": document_type,
-            "workflow_stage": workflow_stage,
-            "document_title": APPLICANT_DOCUMENT_REQUIREMENTS_BY_CODE.get(document_type).title
-            if document_type in APPLICANT_DOCUMENT_REQUIREMENTS_BY_CODE
-            else "",
         },
     )
     return evidence
 
 
+@transaction.atomic
 def upload_evidence_item(
     application,
     actor,
     label,
     uploaded_file,
-    document_type="",
-    recruitment_case=None,
-    workflow_stage="",
+    document_key="",
+    artifact_scope=EvidenceVaultItem.OwnerScope.APPLICATION,
+    artifact_type="",
 ):
+    if not user_can_upload_evidence(actor, application):
+        raise ValueError("You cannot upload evidence for this application.")
+    if artifact_scope == EvidenceVaultItem.OwnerScope.CASE and not hasattr(application, "case"):
+        raise ValueError("A recruitment case must exist before case-owned evidence can be uploaded.")
+    file_size = getattr(uploaded_file, "size", None)
+    if file_size is not None and file_size > settings.MAX_EVIDENCE_UPLOAD_BYTES:
+        raise ValueError("Uploaded file exceeds the configured Evidence Vault size limit.")
     raw_bytes = uploaded_file.read()
-    return store_generated_evidence_item(
+    sha256_digest = hashlib.sha256(raw_bytes).hexdigest()
+    nonce, ciphertext = encrypt_evidence_bytes(raw_bytes)
+    stage = _evidence_stage_for_application(application)
+    document_key = document_key or EvidenceVaultItem.build_document_key(label)
+    owner_kwargs = _evidence_owner_filters(
+        application=application if artifact_scope == EvidenceVaultItem.OwnerScope.APPLICATION else None,
+        recruitment_case=(
+            getattr(application, "case", None) if artifact_scope == EvidenceVaultItem.OwnerScope.CASE else None
+        ),
+        recruitment_entry=(
+            application.position if artifact_scope == EvidenceVaultItem.OwnerScope.ENTRY else None
+        ),
+    )
+    previous_version = EvidenceVaultItem.objects.filter(
+        artifact_scope=owner_kwargs["artifact_scope"],
+        application=owner_kwargs["application"],
+        recruitment_case=owner_kwargs["recruitment_case"],
+        recruitment_entry=owner_kwargs["recruitment_entry"],
+        stage=stage,
+        document_key=document_key,
+        is_current_version=True,
+    ).order_by("-version_number", "-created_at").first()
+    version_family = previous_version.version_family if previous_version else uuid.uuid4()
+    version_number = previous_version.version_number + 1 if previous_version else 1
+    evidence = EvidenceVaultItem(
+        application=owner_kwargs["application"],
+        recruitment_case=owner_kwargs["recruitment_case"],
+        recruitment_entry=owner_kwargs["recruitment_entry"],
+        artifact_scope=owner_kwargs["artifact_scope"],
+        artifact_type=artifact_type or ARTIFACT_TYPE_WORKFLOW_EVIDENCE,
+        uploaded_by=actor,
+        uploaded_by_role=getattr(actor, "role", ""),
+        stage=stage,
+        label=label,
+        document_key=document_key,
+        version_family=version_family,
+        version_number=version_number,
+        previous_version=previous_version,
+        is_current_version=True,
+        original_filename=uploaded_file.name,
+        content_type=getattr(uploaded_file, "content_type", "") or "",
+        size_bytes=len(raw_bytes),
+        digest_algorithm="sha256",
+        sha256_digest=sha256_digest,
+        nonce=nonce,
+        ciphertext=ciphertext,
+    )
+    evidence.full_clean()
+    evidence.save()
+    if previous_version:
+        previous_version.is_current_version = False
+        previous_version.save(update_fields=["is_current_version", "updated_at"])
+    record_audit_event(
         application=application,
         actor=actor,
-        label=label,
-        filename=uploaded_file.name,
-        raw_bytes=raw_bytes,
-        content_type=getattr(uploaded_file, "content_type", "") or "",
-        document_type=document_type,
-        recruitment_case=recruitment_case,
-        workflow_stage=workflow_stage,
+        action=AuditLog.Action.EVIDENCE_UPLOADED,
+        description=f"Uploaded evidence '{label}' {evidence.version_label}.",
+        metadata={
+            "evidence_id": evidence.id,
+            "artifact_scope": evidence.artifact_scope,
+            "artifact_type": evidence.artifact_type,
+            "case_id": evidence.recruitment_case_id,
+            "entry_id": evidence.recruitment_entry_id,
+            "stage": evidence.stage,
+            "document_key": evidence.document_key,
+            "version_family": str(evidence.version_family),
+            "version_number": evidence.version_number,
+            "previous_version_id": previous_version.id if previous_version else None,
+            "sha256": sha256_digest,
+        },
     )
+    return evidence
+
+
+@transaction.atomic
+def update_evidence_archive_status(evidence, actor, action, archive_tag=""):
+    archive_tag = (archive_tag or "").strip()
+    context_application = get_evidence_context_application_for_user(actor, evidence)
+    if context_application is None or not user_can_manage_evidence_archive(actor, context_application):
+        raise ValueError("You cannot change the archive state of this evidence item.")
+
+    if action == "archive":
+        if not archive_tag:
+            raise ValueError("Archive tag is required when archiving an evidence item.")
+        evidence.is_archived = True
+        evidence.archive_tag = archive_tag
+        evidence.archived_at = timezone.now()
+        evidence.archived_by = actor
+        audit_action = AuditLog.Action.EVIDENCE_ARCHIVED
+        description = f"Archived evidence '{evidence.label}' {evidence.version_label}."
+    elif action == "restore":
+        evidence.is_archived = False
+        evidence.archive_tag = ""
+        evidence.archived_at = None
+        evidence.archived_by = None
+        audit_action = AuditLog.Action.EVIDENCE_RESTORED
+        description = f"Restored evidence '{evidence.label}' {evidence.version_label} from archive."
+    else:
+        raise ValueError("Unsupported evidence archive action.")
+
+    evidence.full_clean()
+    evidence.save(
+        update_fields=[
+            "is_archived",
+            "archive_tag",
+            "archived_at",
+            "archived_by",
+            "archived_by_role",
+            "updated_at",
+        ]
+    )
+    record_audit_event(
+        application=context_application,
+        actor=actor,
+        action=audit_action,
+        description=description,
+        metadata={
+            "evidence_id": evidence.id,
+            "stage": evidence.stage,
+            "artifact_scope": evidence.artifact_scope,
+            "artifact_type": evidence.artifact_type,
+            "version_family": str(evidence.version_family),
+            "version_number": evidence.version_number,
+            "archive_tag": evidence.archive_tag,
+            "is_archived": evidence.is_archived,
+        },
+    )
+    return evidence
 
 
 def _route_for_submission(application):
@@ -2007,7 +2743,13 @@ def submit_application(application, actor):
         raise ValueError("This application can no longer be submitted.")
     if not application.checklist_complete:
         raise ValueError("Complete the submission checklist before final submission.")
-    ensure_application_document_completeness(application)
+    missing_requirements = get_missing_required_applicant_document_requirements(application)
+    if missing_requirements:
+        missing_labels = "; ".join(requirement.title for requirement in missing_requirements)
+        raise ValueError(
+            "Upload the required requirement-coded applicant documents before final submission. "
+            f"Missing: {missing_labels}."
+        )
     if not application.position.is_open_for_intake:
         raise ValueError("This recruitment entry is not currently open for intake.")
     if not application.otp_is_currently_valid:
@@ -2073,6 +2815,7 @@ def submit_application(application, actor):
         from_stage="",
         to_stage=case.current_stage,
     )
+    queue_submission_acknowledgment_notification(application, actor=actor)
     return application
 
 
@@ -2146,7 +2889,16 @@ def _transition_target(application, effective_role, action):
             return "", RecruitmentApplication.Status.REJECTED, "Rejected by HRMPSB."
     if effective_role == RecruitmentUser.Role.APPOINTING_AUTHORITY:
         if action == "approve":
-            return "", RecruitmentApplication.Status.APPROVED, "Approved by Appointing Authority."
+            completion_role = _completion_handler_role(application)
+            completion_role_label = RecruitmentUser.Role(completion_role).label
+            return (
+                completion_role,
+                RecruitmentApplication.Status.APPROVED,
+                (
+                    "Approved by Appointing Authority and routed to "
+                    f"{completion_role_label} for completion tracking."
+                ),
+            )
         if action == "return_to_hrm_chief":
             return RecruitmentUser.Role.HRM_CHIEF, RecruitmentApplication.Status.HRM_CHIEF_REVIEW, "Returned by Appointing Authority to HRM Chief."
         if action == "reject":
@@ -2161,13 +2913,6 @@ def process_workflow_action(application, actor, action, remarks):
         raise ValueError("A recruitment case must exist before workflow actions can be processed.")
     if application.case.is_stage_locked:
         raise ValueError("This recruitment case is stage-locked. Use controlled reopen before proceeding.")
-    if (
-        effective_role == RecruitmentUser.Role.APPOINTING_AUTHORITY
-        and action in {"approve", "reject"}
-    ):
-        raise ValueError(
-            "Use final decision recording for selected or not selected outcomes at the Appointing Authority stage."
-        )
     if not user_can_process_application(actor, application):
         if (
             effective_role == RecruitmentUser.Role.SECRETARIAT
@@ -2184,43 +2929,32 @@ def process_workflow_action(application, actor, action, remarks):
         and not screening_is_finalized_for_current_stage(application)
     ):
         raise ValueError("Finalize the screening record before endorsing this application.")
-    current_exam_record = get_exam_record(application)
     if (
-        effective_role in EXAM_REVIEW_ROLES
-        and application.case.current_stage in EXAM_STAGES
-        and action == "endorse"
-        and current_exam_record
-        and not current_exam_record.is_finalized
-    ):
-        raise ValueError("Finalize the examination record before endorsing this application.")
-    current_deliberation_record = get_deliberation_record(application)
-    if (
-        application.branch == PositionPosting.Branch.COS
-        and effective_role == RecruitmentUser.Role.HRM_CHIEF
+        effective_role == RecruitmentUser.Role.HRM_CHIEF
+        and application.branch == PositionPosting.Branch.COS
         and application.case.current_stage == RecruitmentCase.Stage.HRM_CHIEF_REVIEW
         and action == "endorse"
-        and (not current_deliberation_record or not current_deliberation_record.is_finalized)
     ):
-        raise ValueError("Finalize the deliberation record before endorsing this COS application.")
-    current_car_report = get_comparative_assessment_report(application)
+        deliberation_record = get_deliberation_record(application, stage=application.case.current_stage)
+        if not deliberation_record or not deliberation_record.is_finalized:
+            raise ValueError("Finalize the deliberation record before endorsing this COS application.")
     if (
-        application.branch == PositionPosting.Branch.PLANTILLA
-        and effective_role == RecruitmentUser.Role.HRMPSB_MEMBER
+        effective_role == RecruitmentUser.Role.HRMPSB_MEMBER
+        and application.branch == PositionPosting.Branch.PLANTILLA
         and application.case.current_stage == RecruitmentCase.Stage.HRMPSB_REVIEW
         and action == "recommend"
-        and (not current_deliberation_record or not current_deliberation_record.is_finalized)
     ):
-        raise ValueError("Finalize the deliberation record before recommending this Plantilla application.")
-    if (
-        application.branch == PositionPosting.Branch.PLANTILLA
-        and effective_role == RecruitmentUser.Role.HRMPSB_MEMBER
-        and application.case.current_stage == RecruitmentCase.Stage.HRMPSB_REVIEW
-        and action == "recommend"
-        and (not current_car_report or not current_car_report.is_finalized)
-    ):
-        raise ValueError(
-            "Finalize the Comparative Assessment Report before recommending this Plantilla application."
+        deliberation_record = get_deliberation_record(application, stage=application.case.current_stage)
+        if not deliberation_record or not deliberation_record.is_finalized:
+            raise ValueError("Finalize the deliberation record before recommending this Plantilla application.")
+        comparative_assessment_report = get_comparative_assessment_report(
+            application,
+            stage=application.case.current_stage,
         )
+        if not comparative_assessment_report or not comparative_assessment_report.is_finalized:
+            raise ValueError(
+                "Finalize the Comparative Assessment Report before recommending this Plantilla application."
+            )
 
     next_role, next_status, description = _transition_target(application, effective_role, action)
     previous_role = application.current_handler_role
@@ -2234,11 +2968,13 @@ def process_workflow_action(application, actor, action, remarks):
     )
     application.current_handler_role = next_role
     application.status = next_status
-    if next_status in {
+    if application.case.current_stage == RecruitmentCase.Stage.CLOSED and next_status in {
         RecruitmentApplication.Status.APPROVED,
         RecruitmentApplication.Status.REJECTED,
     }:
         application.closed_at = timezone.now()
+    else:
+        application.closed_at = None
     application.save(update_fields=["current_handler_role", "status", "closed_at", "updated_at"])
 
     record_audit_event(
@@ -2300,7 +3036,205 @@ def process_workflow_action(application, actor, action, remarks):
                 description="Secretariat override consumed during Level 2 processing.",
                 metadata={"override_id": override.id},
             )
+    if next_status == RecruitmentApplication.Status.APPROVED:
+        queue_selected_applicant_notification(application, actor=actor)
+    elif next_status == RecruitmentApplication.Status.REJECTED:
+        queue_non_selected_applicant_notification(application, actor=actor)
     return application
+
+
+@transaction.atomic
+def record_final_decision(application, actor, cleaned_data):
+    if not hasattr(application, "case"):
+        raise ValueError("A recruitment case must exist before a final decision can be recorded.")
+    if application.case.is_stage_locked:
+        raise ValueError("This recruitment case is stage-locked. Use controlled reopen before proceeding.")
+    if not user_can_record_final_decision(actor, application):
+        raise ValueError(
+            "Only the Appointing Authority may record the final decision at the current workflow stage."
+        )
+    if application.case.current_stage != RecruitmentCase.Stage.APPOINTING_AUTHORITY_REVIEW:
+        raise ValueError(
+            "Final decisions may only be recorded during the Appointing Authority review stage."
+        )
+
+    submission_packet = build_submission_packet(application)
+    missing_components = submission_packet["summary"]["missing_components"]
+    if missing_components:
+        raise ValueError(
+            "Submission packet is incomplete for final decision recording. Missing: "
+            + "; ".join(missing_components)
+            + "."
+        )
+
+    decision = FinalDecision(
+        application=application,
+        recruitment_case=application.case,
+        recruitment_entry=application.position,
+        review_stage=RecruitmentCase.Stage.APPOINTING_AUTHORITY_REVIEW,
+        decided_by=actor,
+        branch=application.branch,
+        level=application.level,
+        decision_outcome=cleaned_data["decision_outcome"],
+        decision_notes=cleaned_data["decision_notes"],
+        submission_packet_snapshot=submission_packet,
+    )
+    decision.full_clean()
+    decision.save()
+
+    next_status = FINAL_DECISION_OUTCOME_TO_STATUS[decision.decision_outcome]
+    next_role = _completion_handler_role(application) if decision.is_selected else ""
+    previous_role = application.current_handler_role
+    previous_status = application.status
+    case_transition = _sync_case_after_workflow_action(
+        application=application,
+        actor=actor,
+        next_role=next_role,
+        next_status=next_status,
+        remarks=decision.decision_notes,
+    )
+    application.current_handler_role = next_role
+    application.status = next_status
+    application.closed_at = timezone.now() if application.case.current_stage == RecruitmentCase.Stage.CLOSED else None
+    application.save(update_fields=["current_handler_role", "status", "closed_at", "updated_at"])
+
+    record_audit_event(
+        application=application,
+        actor=actor,
+        action=AuditLog.Action.DECISION_RECORDED,
+        description=(
+            "Final decision recorded as selected by the Appointing Authority."
+            if decision.is_selected
+            else "Final decision recorded as not selected by the Appointing Authority."
+        ),
+        metadata={
+            "final_decision_id": decision.id,
+            "decision_outcome": decision.decision_outcome,
+            "decision_notes": decision.decision_notes,
+            "from_status": previous_status,
+            "to_status": next_status,
+            "from_role": previous_role,
+            "to_role": next_role,
+            "from_stage": case_transition["previous_stage"],
+            "to_stage": application.case.current_stage,
+            "from_case_status": case_transition["previous_case_status"],
+            "to_case_status": application.case.case_status,
+            "case_locked": application.case.is_stage_locked,
+            "preserved_artifact_ids": submission_packet["preserved_artifact_ids"],
+        },
+    )
+    if next_role:
+        record_audit_event(
+            application=application,
+            actor=actor,
+            action=AuditLog.Action.ROUTED,
+            description=f"Application routed to {next_role} for completion handling.",
+            metadata={
+                "status": next_status,
+                "current_handler_role": next_role,
+                **_case_timeline_metadata(application.case),
+            },
+        )
+        record_routing_history_event(
+            application=application,
+            actor=actor,
+            route_type=RoutingHistory.RouteType.FORWARD,
+            description=f"Application routed to {next_role} for completion handling.",
+            recruitment_case=application.case,
+            from_handler_role=previous_role,
+            to_handler_role=next_role,
+            from_status=previous_status,
+            to_status=next_status,
+            from_stage=case_transition["previous_stage"],
+            to_stage=application.case.current_stage,
+            notes=decision.decision_notes,
+        )
+        queue_selected_applicant_notification(application, actor=actor)
+    else:
+        queue_non_selected_applicant_notification(application, actor=actor)
+    return decision
+
+
+@transaction.atomic
+def close_recruitment_case(application, actor, closure_notes):
+    if not hasattr(application, "case"):
+        raise ValueError("A recruitment case must exist before it can be closed.")
+    if not user_can_manage_completion(actor, application):
+        raise ValueError("You cannot close this recruitment case at its current workflow stage.")
+
+    case = application.case
+    if case.current_stage != RecruitmentCase.Stage.COMPLETION:
+        raise ValueError("Case closure is only available from the completion tracking stage.")
+
+    completion_record = get_completion_record(application)
+    if not completion_record:
+        raise ValueError("Record completion tracking before closing the recruitment case.")
+    if not completion_record.requirements.exists():
+        raise ValueError("Add at least one completion requirement item before closing the case.")
+    if completion_record.has_pending_requirements:
+        raise ValueError(
+            "All completion requirements must be marked completed or not applicable before closing the case."
+        )
+
+    previous_role = application.current_handler_role
+    previous_stage = case.current_stage
+    previous_case_status = case.case_status
+    closed_at = timezone.now()
+
+    case.current_stage = RecruitmentCase.Stage.CLOSED
+    case.case_status = RecruitmentCase.CaseStatus.APPROVED
+    case.current_handler_role = ""
+    case.is_stage_locked = True
+    case.locked_stage = RecruitmentCase.Stage.COMPLETION
+    case.closed_at = closed_at
+    case.save(
+        update_fields=[
+            "branch",
+            "current_stage",
+            "current_handler_role",
+            "case_status",
+            "is_stage_locked",
+            "locked_stage",
+            "closed_at",
+            "updated_at",
+        ]
+    )
+
+    application.current_handler_role = ""
+    application.closed_at = closed_at
+    application.save(update_fields=["current_handler_role", "closed_at", "updated_at"])
+
+    record_audit_event(
+        application=application,
+        actor=actor,
+        action=AuditLog.Action.CASE_CLOSED,
+        description="Closed the recruitment case after completion tracking.",
+        metadata={
+            "remarks": closure_notes,
+            "from_stage": previous_stage,
+            "to_stage": case.current_stage,
+            "from_case_status": previous_case_status,
+            "to_case_status": case.case_status,
+            "completion_record_id": completion_record.id,
+            "requirement_count": completion_record.total_requirement_count,
+            "resolved_requirement_count": completion_record.completed_requirement_count,
+        },
+    )
+    record_routing_history_event(
+        application=application,
+        actor=actor,
+        route_type=RoutingHistory.RouteType.CLOSE,
+        description="Recruitment case closed after completion tracking.",
+        recruitment_case=case,
+        from_handler_role=previous_role,
+        to_handler_role="",
+        from_status=application.status,
+        to_status=application.status,
+        from_stage=previous_stage,
+        to_stage=case.current_stage,
+        notes=closure_notes,
+    )
+    return case
 
 
 @transaction.atomic
@@ -2309,11 +3243,25 @@ def grant_secretariat_override(application, actor, reason):
         raise ValueError("Only the System Administrator can grant a Secretariat override.")
     if application.level != PositionPosting.Level.LEVEL_2:
         raise ValueError("Overrides are only available for Level 2 applications.")
+    if not hasattr(application, "case"):
+        raise ValueError("A recruitment case must exist before an override can be granted.")
     if application.status in {
         RecruitmentApplication.Status.APPROVED,
         RecruitmentApplication.Status.REJECTED,
     }:
         raise ValueError("Closed applications cannot be overridden.")
+    case = application.case
+    if case.is_stage_locked:
+        raise ValueError("Stage-locked recruitment cases cannot be rerouted by override.")
+    if (
+        application.status != RecruitmentApplication.Status.HRM_CHIEF_REVIEW
+        or application.current_handler_role != RecruitmentUser.Role.HRM_CHIEF
+        or case.current_stage != RecruitmentCase.Stage.HRM_CHIEF_REVIEW
+        or case.current_handler_role != RecruitmentUser.Role.HRM_CHIEF
+    ):
+        raise ValueError(
+            "Secretariat overrides are only available while a Level 2 application is actively assigned to the HRM Chief review stage."
+        )
     previous_role = application.current_handler_role
     previous_status = application.status
     application.overrides.filter(is_active=True).update(
@@ -2326,27 +3274,25 @@ def grant_secretariat_override(application, actor, reason):
         target_role=RecruitmentUser.Role.SECRETARIAT,
         reason=reason,
     )
-    case = getattr(application, "case", None)
-    previous_stage = case.current_stage if case else _review_stage_from_application_status(application.status)
-    if case:
-        case.current_stage = RecruitmentCase.Stage.SECRETARIAT_REVIEW
-        case.current_handler_role = RecruitmentUser.Role.SECRETARIAT
-        case.case_status = RecruitmentCase.CaseStatus.ACTIVE
-        case.is_stage_locked = False
-        case.locked_stage = ""
-        case.closed_at = None
-        case.save(
-            update_fields=[
-                "branch",
-                "current_stage",
-                "current_handler_role",
-                "case_status",
-                "is_stage_locked",
-                "locked_stage",
-                "closed_at",
-                "updated_at",
-            ]
-        )
+    previous_stage = case.current_stage
+    case.current_stage = RecruitmentCase.Stage.SECRETARIAT_REVIEW
+    case.current_handler_role = RecruitmentUser.Role.SECRETARIAT
+    case.case_status = RecruitmentCase.CaseStatus.ACTIVE
+    case.is_stage_locked = False
+    case.locked_stage = ""
+    case.closed_at = None
+    case.save(
+        update_fields=[
+            "branch",
+            "current_stage",
+            "current_handler_role",
+            "case_status",
+            "is_stage_locked",
+            "locked_stage",
+            "closed_at",
+            "updated_at",
+        ]
+    )
     application.current_handler_role = RecruitmentUser.Role.SECRETARIAT
     application.status = RecruitmentApplication.Status.SECRETARIAT_REVIEW
     application.save(update_fields=["current_handler_role", "status", "updated_at"])
@@ -2409,7 +3355,7 @@ def reopen_recruitment_case(application, actor, reason):
         raise ValueError("The locked recruitment case does not point to a reopenable workflow stage.")
 
     case.current_stage = reopened_stage
-    case.current_handler_role = _handler_role_from_stage(reopened_stage)
+    case.current_handler_role = _handler_role_from_stage(reopened_stage, application=application)
     case.case_status = RecruitmentCase.CaseStatus.ACTIVE
     case.is_stage_locked = False
     case.locked_stage = ""
@@ -2472,42 +3418,103 @@ def reopen_recruitment_case(application, actor, reason):
     return case
 
 
-def _build_application_pdf(application):
-    case = getattr(application, "case", None)
+def _build_pdf_document(title, lines, *, document_title="RecruitGuard-CHD Export"):
     buffer = BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=A4)
-    width, height = A4
-    y = height - 50
-    lines = [
-        "RecruitGuard-CHD Controlled Export",
-        f"Reference: {application.reference_number}",
-        f"Applicant: {application.applicant}",
-        f"Position: {application.position.title}",
-        f"Branch: {application.position.get_branch_display()}",
-        f"Level: {application.position.get_level_display()}",
-        f"Status: {application.get_status_display()}",
-        f"Current Handler: {application.current_handler_role or 'Closed'}",
-        f"Case Stage: {case.get_current_stage_display() if case else 'Not created'}",
-        f"Case Status: {case.get_case_status_display() if case else 'N/A'}",
-        "",
-        "Qualification Summary:",
-        application.qualification_summary,
-        "",
-        "Cover Letter:",
-        application.cover_letter or "N/A",
-    ]
-    pdf.setTitle(application.reference_number)
-    pdf.setFont("Helvetica", 11)
-    for line in lines:
-        pdf.drawString(50, y, line[:100])
-        y -= 18
-        if y < 70:
-            pdf.showPage()
-            pdf.setFont("Helvetica", 11)
-            y = height - 50
+    _page_width, page_height = A4
+
+    def start_page():
+        pdf.setTitle(document_title)
+        pdf.setFont("Helvetica-Bold", 14)
+        pdf.drawString(50, page_height - 50, title[:90])
+        pdf.setFont("Helvetica", 10)
+        return page_height - 80
+
+    y = start_page()
+    for raw_line in lines:
+        line_text = str(raw_line or "")
+        wrapped_lines = (
+            textwrap.wrap(
+                line_text,
+                width=100,
+                break_long_words=True,
+                break_on_hyphens=False,
+            )
+            if line_text
+            else [""]
+        )
+        for line in wrapped_lines:
+            if y < 60:
+                pdf.showPage()
+                y = start_page()
+            if line:
+                pdf.drawString(50, y, line)
+            y -= 14
+
     pdf.save()
     buffer.seek(0)
     return buffer.getvalue()
+
+
+def _build_application_pdf(application, *, actor=None, generated_at=None):
+    case = getattr(application, "case", None)
+    completion_record = get_completion_record(application)
+    evidence_items = list(get_evidence_items_for_application_context(application))
+    generated_at = generated_at or timezone.now()
+    actor_label = str(actor) if actor else "System"
+    actor_role = actor.get_role_display() if actor else "System"
+    lines = [
+        f"Reference: {application.reference_number}",
+        f"Application ID: {application.id}",
+        f"Recruitment Case ID: {case.id if case else 'Not created'}",
+        f"Exported At: {generated_at:%Y-%m-%d %H:%M}",
+        f"Exported By: {actor_label} ({actor_role})",
+        f"Applicant: {application.applicant_display_name}",
+        f"Position: {application.position.title} [{application.position.job_code}]",
+        f"Branch: {application.position.get_branch_display()}",
+        f"Level: {application.position.get_level_display()}",
+        f"Application Status: {application.get_status_display()}",
+        f"Current Handler: {application.current_handler_role or 'Closed'}",
+        f"Case Stage: {case.get_current_stage_display() if case else 'Not created'}",
+        f"Case Status: {case.get_case_status_display() if case else 'N/A'}",
+        f"Stage Locked: {'Yes' if getattr(case, 'is_stage_locked', False) else 'No'}",
+        f"Submission Hash: {application.submission_hash or 'N/A'}",
+        "",
+        "Qualification Summary:",
+        application.qualification_summary or "N/A",
+        "",
+        "Cover Letter:",
+        application.cover_letter or "N/A",
+        "",
+        f"Evidence Count: {len(evidence_items)}",
+        f"Audit Entry Count: {application.audit_logs.count()}",
+        f"Routing Event Count: {application.routing_history.count()}",
+    ]
+    if completion_record:
+        lines.extend(
+            [
+                "",
+                "Completion Tracking:",
+                f"Reference: {completion_record.completion_reference or 'N/A'}",
+                (
+                    f"Completion Date: {completion_record.completion_date:%Y-%m-%d}"
+                    if completion_record.completion_date
+                    else "Completion Date: N/A"
+                ),
+                (
+                    f"Deadline: {completion_record.deadline:%Y-%m-%d}"
+                    if completion_record.deadline
+                    else "Deadline: N/A"
+                ),
+                f"Announcement Reference: {completion_record.announcement_reference or 'N/A'}",
+                f"Requirements Ready for Closure: {'Yes' if completion_record.requirements_ready_for_closure else 'No'}",
+            ]
+        )
+    return _build_pdf_document(
+        "RecruitGuard-CHD Controlled Export Summary",
+        lines,
+        document_title=application.reference_number or "RecruitGuard-CHD Export",
+    )
 
 
 def _build_comparative_assessment_report_pdf(
@@ -2517,10 +3524,6 @@ def _build_comparative_assessment_report_pdf(
     generation_number,
     summary_notes,
 ):
-    buffer = BytesIO()
-    pdf = canvas.Canvas(buffer, pagesize=A4)
-    width, height = A4
-    y = height - 50
     lines = [
         "RecruitGuard-CHD Comparative Assessment Report",
         f"Recruitment Entry: {application.position.title} [{application.position.job_code}]",
@@ -2550,80 +3553,684 @@ def _build_comparative_assessment_report_pdf(
                 "",
             ]
         )
-    pdf.setTitle(f"{application.position.job_code} Comparative Assessment Report")
-    pdf.setFont("Helvetica", 11)
-    for line in lines:
-        pdf.drawString(50, y, line[:100])
-        y -= 18
-        if y < 70:
-            pdf.showPage()
-            pdf.setFont("Helvetica", 11)
-            y = height - 50
-    pdf.save()
-    buffer.seek(0)
-    return buffer.getvalue()
+    return _build_pdf_document(
+        "RecruitGuard-CHD Comparative Assessment Report",
+        lines,
+        document_title=f"{application.position.job_code} Comparative Assessment Report",
+    )
 
 
 def _audit_log_csv(application):
     buffer = StringIO()
     writer = csv.writer(buffer)
-    writer.writerow(["timestamp", "actor", "actor_role", "action", "description"])
+    writer.writerow(
+        [
+            "timestamp",
+            "case_reference",
+            "workflow_stage",
+            "actor",
+            "actor_role",
+            "action",
+            "is_sensitive_access",
+            "description",
+            "metadata",
+        ]
+    )
     for row in application.audit_logs.select_related("actor").order_by("created_at"):
         writer.writerow(
             [
                 row.created_at.isoformat(),
+                row.case_reference,
+                row.workflow_stage,
                 row.actor.username if row.actor else "",
                 row.actor_role,
                 row.action,
+                row.is_sensitive_access,
                 row.description,
+                json.dumps(row.metadata, sort_keys=True),
             ]
         )
     return buffer.getvalue().encode("utf-8")
 
 
-def _manifest_json(application):
+def _routing_history_csv(application):
+    buffer = StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(
+        [
+            "timestamp",
+            "route_type",
+            "branch",
+            "level",
+            "actor",
+            "actor_role",
+            "from_handler_role",
+            "to_handler_role",
+            "from_status",
+            "to_status",
+            "from_stage",
+            "to_stage",
+            "is_override",
+            "description",
+            "notes",
+        ]
+    )
+    for row in application.routing_history.select_related("actor").order_by("created_at"):
+        writer.writerow(
+            [
+                row.created_at.isoformat(),
+                row.route_type,
+                row.branch,
+                row.level,
+                row.actor.username if row.actor else "",
+                row.actor_role,
+                row.from_handler_role,
+                row.to_handler_role,
+                row.from_status,
+                row.to_status,
+                row.from_stage,
+                row.to_stage,
+                row.is_override,
+                row.description,
+                row.notes,
+            ]
+        )
+    return buffer.getvalue().encode("utf-8")
+
+
+def _submission_packet_json(application):
+    return json.dumps(build_submission_packet(application), indent=2).encode("utf-8")
+
+
+def _safe_export_path_component(value, fallback):
+    normalized = slugify(value or "")
+    return normalized or fallback
+
+
+def _safe_export_filename(filename, fallback):
+    safe_name = os.path.basename(filename or "").strip().replace("\\", "_").replace("/", "_")
+    return safe_name or fallback
+
+
+def _export_bundle_root(application):
+    reference = application.reference_number or f"application-{application.id}"
+    return f"{reference}/"
+
+
+def _evidence_export_path(evidence, bundle_root):
+    scope_component = _safe_export_path_component(evidence.artifact_scope, "artifact")
+    stage_component = _safe_export_path_component(evidence.stage, "unstaged")
+    document_component = evidence.document_key or _safe_export_path_component(evidence.label, "artifact")
+    fallback_name = f"{document_component}.bin"
+    filename = _safe_export_filename(evidence.original_filename, fallback_name)
+    return (
+        f"{bundle_root}evidence/{scope_component}/{stage_component}/{document_component}/"
+        f"{evidence.version_label}_{filename}"
+    )
+
+
+def _collect_export_evidence(application, bundle_root):
+    evidence_items = get_evidence_items_for_application_context(application).select_related(
+        "uploaded_by",
+        "archived_by",
+        "recruitment_case",
+        "recruitment_entry",
+    ).order_by("stage", "document_key", "version_number", "created_at", "id")
+    export_items = []
+    for evidence in evidence_items:
+        plaintext = _decrypt_evidence_bytes(evidence)
+        exported_sha256 = hashlib.sha256(plaintext).hexdigest()
+        export_items.append(
+            {
+                "id": evidence.id,
+                "artifact_scope": evidence.artifact_scope,
+                "artifact_scope_label": evidence.get_artifact_scope_display(),
+                "artifact_type": evidence.artifact_type,
+                "application_id": evidence.application_id,
+                "recruitment_case_id": evidence.recruitment_case_id,
+                "recruitment_entry_id": evidence.recruitment_entry_id,
+                "label": evidence.label,
+                "stage": evidence.stage,
+                "stage_label": evidence.get_stage_display(),
+                "document_key": evidence.document_key,
+                "version_family": str(evidence.version_family),
+                "version_number": evidence.version_number,
+                "version_label": evidence.version_label,
+                "is_current_version": evidence.is_current_version,
+                "is_archived": evidence.is_archived,
+                "archive_tag": evidence.archive_tag,
+                "original_filename": evidence.original_filename,
+                "uploaded_by": str(evidence.uploaded_by),
+                "uploaded_by_role": evidence.uploaded_by_role,
+                "stored_at": evidence.created_at.isoformat(),
+                "digest_algorithm": evidence.digest_algorithm,
+                "stored_sha256_digest": evidence.sha256_digest,
+                "exported_sha256_digest": exported_sha256,
+                "sha256_matches_stored": exported_sha256 == evidence.sha256_digest,
+                "size_bytes": evidence.size_bytes,
+                "content_type": evidence.content_type,
+                "export_path": _evidence_export_path(evidence, bundle_root),
+                "file_bytes": plaintext,
+            }
+        )
+    return export_items
+
+
+def _evidence_inventory_csv(application, actor, generated_at, evidence_exports):
+    buffer = StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(
+        [
+            "case_reference",
+            "application_id",
+            "recruitment_case_id",
+            "recruitment_entry_id",
+            "export_generated_at",
+            "exported_by",
+            "exported_by_role",
+            "evidence_id",
+            "artifact_scope",
+            "artifact_scope_label",
+            "artifact_type",
+            "label",
+            "stage",
+            "stage_label",
+            "document_key",
+            "version_family",
+            "version_number",
+            "is_current_version",
+            "is_archived",
+            "archive_tag",
+            "original_filename",
+            "uploaded_by",
+            "uploaded_by_role",
+            "stored_at",
+            "digest_algorithm",
+            "stored_sha256_digest",
+            "exported_sha256_digest",
+            "digest_match",
+            "size_bytes",
+            "export_path",
+        ]
+    )
     case = getattr(application, "case", None)
+    for item in evidence_exports:
+        writer.writerow(
+            [
+                application.reference_number,
+                application.id,
+                getattr(case, "id", ""),
+                application.position_id,
+                generated_at.isoformat(),
+                actor.username,
+                actor.role,
+                item["id"],
+                item["artifact_scope"],
+                item["artifact_scope_label"],
+                item["artifact_type"],
+                item["label"],
+                item["stage"],
+                item["stage_label"],
+                item["document_key"],
+                item["version_family"],
+                item["version_number"],
+                item["is_current_version"],
+                item["is_archived"],
+                item["archive_tag"],
+                item["original_filename"],
+                item["uploaded_by"],
+                item["uploaded_by_role"],
+                item["stored_at"],
+                item["digest_algorithm"],
+                item["stored_sha256_digest"],
+                item["exported_sha256_digest"],
+                item["sha256_matches_stored"],
+                item["size_bytes"],
+                item["export_path"],
+            ]
+        )
+    return buffer.getvalue().encode("utf-8")
+
+
+def _build_evidence_inventory_pdf(application, actor, generated_at, evidence_exports):
+    case = getattr(application, "case", None)
+    lines = [
+        f"Reference: {application.reference_number}",
+        f"Application ID: {application.id}",
+        f"Recruitment Case ID: {case.id if case else 'Not created'}",
+        f"Generated At: {generated_at:%Y-%m-%d %H:%M}",
+        f"Exported By: {actor} ({actor.get_role_display()})",
+        f"Evidence Count: {len(evidence_exports)}",
+    ]
+    if not evidence_exports:
+        lines.extend(
+            [
+                "",
+                "No evidence files were present in the Evidence Vault for this export.",
+            ]
+        )
+    else:
+        for index, item in enumerate(evidence_exports, start=1):
+            lines.extend(
+                [
+                    "",
+                    (
+                        f"{index}. {item['label']} | {item['artifact_scope_label']} | "
+                        f"{item['stage_label']} | {item['version_label']}"
+                    ),
+                    (
+                        f"Filename: {item['original_filename']} | Current Version: "
+                        f"{'Yes' if item['is_current_version'] else 'No'} | Archived: "
+                        f"{'Yes' if item['is_archived'] else 'No'}"
+                    ),
+                    (
+                        f"Uploader: {item['uploaded_by']} ({item['uploaded_by_role']}) | "
+                        f"Stored At: {item['stored_at']}"
+                    ),
+                    f"SHA-256: {item['stored_sha256_digest']}",
+                    f"Export Path: {item['export_path']}",
+                ]
+            )
+    return _build_pdf_document(
+        "RecruitGuard-CHD Evidence Inventory",
+        lines,
+        document_title=f"{application.reference_number} Evidence Inventory",
+    )
+
+
+def _manifest_json(
+    application,
+    *,
+    actor,
+    generated_at,
+    bundle_root,
+    evidence_exports,
+    bundle_members,
+    audit_log_path,
+    routing_history_path,
+    inventory_paths,
+    verification_paths,
+    submission_packet_path,
+    export_log,
+):
+    case = getattr(application, "case", None)
+    completion_record = get_completion_record(application)
+    submission_packet = build_submission_packet(application)
     payload = {
-        "reference_number": application.reference_number,
-        "branch": application.branch,
-        "level": application.level,
-        "status": application.status,
-        "current_handler_role": application.current_handler_role,
+        "export": {
+            "bundle_root": bundle_root,
+            "generated_at": generated_at.isoformat(),
+            "bundle_member_count": len(bundle_members),
+            "evidence_file_count": len(evidence_exports),
+            "export_log_id": export_log.id,
+            "export_log_created_at": export_log.created_at.isoformat(),
+            "exported_by": {
+                "id": actor.id,
+                "username": actor.username,
+                "display_name": str(actor),
+                "role": actor.role,
+                "role_label": actor.get_role_display(),
+            },
+        },
+        "source_application": {
+            "id": application.id,
+            "reference_number": application.reference_number,
+            "branch": application.branch,
+            "branch_label": application.get_branch_display(),
+            "level": application.level,
+            "level_label": application.get_level_display(),
+            "status": application.status,
+            "status_label": application.get_status_display(),
+            "current_handler_role": application.current_handler_role,
+            "position": {
+                "entry_id": application.position_id,
+                "job_code": application.position.job_code,
+                "title": application.position.title,
+            },
+        },
         "submission_hash": application.submission_hash,
-        "case": {
+        "source_case": {
+            "id": getattr(case, "id", None),
             "current_stage": getattr(case, "current_stage", ""),
+            "current_stage_label": case.get_current_stage_display() if case else "",
             "case_status": getattr(case, "case_status", ""),
+            "case_status_label": case.get_case_status_display() if case else "",
             "current_handler_role": getattr(case, "current_handler_role", ""),
             "is_stage_locked": getattr(case, "is_stage_locked", False),
         },
+        "bundle_contents": {
+            "members": bundle_members,
+            "audit_log_path": audit_log_path,
+            "routing_history_path": routing_history_path,
+            "submission_packet_path": submission_packet_path,
+            "inventory_paths": inventory_paths,
+            "verification_paths": verification_paths,
+        },
+        "submission_packet_summary": submission_packet.get("summary", {}),
         "evidence": [
             {
-                "label": item.label,
-                "document_type": item.document_type,
-                "workflow_stage": item.workflow_stage,
-                "original_filename": item.original_filename,
-                "sha256_digest": item.sha256_digest,
-                "size_bytes": item.size_bytes,
+                "evidence_id": item["id"],
+                "artifact_scope": item["artifact_scope"],
+                "artifact_scope_label": item["artifact_scope_label"],
+                "artifact_type": item["artifact_type"],
+                "application_id": item["application_id"],
+                "recruitment_case_id": item["recruitment_case_id"],
+                "recruitment_entry_id": item["recruitment_entry_id"],
+                "label": item["label"],
+                "document_key": item["document_key"],
+                "stage": item["stage"],
+                "stage_label": item["stage_label"],
+                "version_family": item["version_family"],
+                "version_number": item["version_number"],
+                "version_label": item["version_label"],
+                "is_current_version": item["is_current_version"],
+                "is_archived": item["is_archived"],
+                "archive_tag": item["archive_tag"],
+                "original_filename": item["original_filename"],
+                "uploaded_by": item["uploaded_by"],
+                "uploaded_by_role": item["uploaded_by_role"],
+                "stored_at": item["stored_at"],
+                "digest_algorithm": item["digest_algorithm"],
+                "stored_sha256_digest": item["stored_sha256_digest"],
+                "exported_sha256_digest": item["exported_sha256_digest"],
+                "sha256_matches_stored": item["sha256_matches_stored"],
+                "size_bytes": item["size_bytes"],
+                "export_path": item["export_path"],
             }
-            for item in application.evidence_items.all()
+            for item in evidence_exports
+        ],
+        "completion": (
+            {
+                "completion_reference": completion_record.completion_reference,
+                "completion_date": (
+                    completion_record.completion_date.isoformat()
+                    if completion_record.completion_date
+                    else ""
+                ),
+                "deadline": completion_record.deadline.isoformat() if completion_record.deadline else "",
+                "announcement_reference": completion_record.announcement_reference,
+                "announcement_date": (
+                    completion_record.announcement_date.isoformat()
+                    if completion_record.announcement_date
+                    else ""
+                ),
+                "remarks": completion_record.remarks,
+                "requirements": [
+                    {
+                        "item_label": requirement.item_label,
+                        "status": requirement.status,
+                        "notes": requirement.notes,
+                    }
+                    for requirement in completion_record.requirements.all()
+                ],
+            }
+            if completion_record
+            else {}
+        ),
+        "routing_history": [
+            {
+                "timestamp": route.created_at.isoformat(),
+                "route_type": route.route_type,
+                "actor_role": route.actor_role,
+                "from_handler_role": route.from_handler_role,
+                "to_handler_role": route.to_handler_role,
+                "from_status": route.from_status,
+                "to_status": route.to_status,
+                "from_stage": route.from_stage,
+                "to_stage": route.to_stage,
+                "is_override": route.is_override,
+                "description": route.description,
+                "notes": route.notes,
+            }
+            for route in application.routing_history.order_by("created_at")
+        ],
+        "final_decisions": [
+            {
+                "review_stage": decision.review_stage,
+                "decision_outcome": decision.decision_outcome,
+                "decision_notes": decision.decision_notes,
+                "decided_by_role": decision.decided_by_role,
+                "decided_at": decision.decided_at.isoformat() if decision.decided_at else "",
+            }
+            for decision in get_final_decision_history(application)
         ],
     }
     return json.dumps(payload, indent=2).encode("utf-8")
 
 
+def _verification_report_payload(
+    application,
+    *,
+    actor,
+    generated_at,
+    bundle_root,
+    verifiable_entries,
+    evidence_exports,
+):
+    case = getattr(application, "case", None)
+    file_hashes = {
+        path: hashlib.sha256(content).hexdigest()
+        for path, content in sorted(verifiable_entries.items())
+    }
+    evidence_verification = []
+    for item in evidence_exports:
+        exported_digest = file_hashes[item["export_path"]]
+        evidence_verification.append(
+            {
+                "evidence_id": item["id"],
+                "export_path": item["export_path"],
+                "stored_sha256_digest": item["stored_sha256_digest"],
+                "exported_sha256_digest": exported_digest,
+                "digest_match": exported_digest == item["stored_sha256_digest"],
+            }
+        )
+    return {
+        "verification_generated_at": generated_at.isoformat(),
+        "bundle_root": bundle_root,
+        "digest_algorithm": "sha256",
+        "verification_scope": "All bundle members except verification outputs.",
+        "source_application_id": application.id,
+        "source_case_id": getattr(case, "id", None),
+        "case_reference": application.reference_number,
+        "exported_by": {
+            "id": actor.id,
+            "username": actor.username,
+            "role": actor.role,
+        },
+        "covered_file_count": len(file_hashes),
+        "evidence_file_count": len(evidence_exports),
+        "covered_files": [
+            {"path": path, "sha256_digest": digest}
+            for path, digest in file_hashes.items()
+        ],
+        "evidence_files": evidence_verification,
+    }
+
+
+def _verification_report_json(
+    application,
+    *,
+    actor,
+    generated_at,
+    bundle_root,
+    verifiable_entries,
+    evidence_exports,
+):
+    payload = _verification_report_payload(
+        application,
+        actor=actor,
+        generated_at=generated_at,
+        bundle_root=bundle_root,
+        verifiable_entries=verifiable_entries,
+        evidence_exports=evidence_exports,
+    )
+    return json.dumps(payload, indent=2).encode("utf-8"), payload
+
+
+def _verification_checksums_text(verification_payload):
+    lines = [
+        f"{item['sha256_digest']}  {item['path']}"
+        for item in verification_payload["covered_files"]
+    ]
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+def _build_verification_summary_pdf(application, actor, generated_at, verification_payload):
+    matching_count = sum(
+        1 for item in verification_payload["evidence_files"] if item["digest_match"]
+    )
+    lines = [
+        f"Reference: {application.reference_number}",
+        f"Application ID: {application.id}",
+        f"Generated At: {generated_at:%Y-%m-%d %H:%M}",
+        f"Exported By: {actor} ({actor.get_role_display()})",
+        f"Verification Scope: {verification_payload['verification_scope']}",
+        f"Covered File Count: {verification_payload['covered_file_count']}",
+        (
+            f"Evidence Digest Matches: {matching_count} of "
+            f"{verification_payload['evidence_file_count']}"
+        ),
+        "",
+        "Independent Verification Steps:",
+        "1. Extract the ZIP bundle without modifying file names or folder structure.",
+        "2. Recompute SHA-256 hashes for each path listed in verification/checksums.sha256.",
+        "3. Confirm the recomputed digest matches the listed digest for each file.",
+        "4. For evidence files, confirm the digest also matches the stored digest in the inventory or JSON report.",
+    ]
+    mismatches = [
+        item for item in verification_payload["evidence_files"] if not item["digest_match"]
+    ]
+    if mismatches:
+        lines.extend(["", "Digest Mismatches Detected:"])
+        for item in mismatches:
+            lines.append(f"Evidence {item['evidence_id']} mismatch at {item['export_path']}")
+    else:
+        lines.extend(["", "All exported evidence files matched their stored SHA-256 digests."])
+    return _build_pdf_document(
+        "RecruitGuard-CHD Verification Summary",
+        lines,
+        document_title=f"{application.reference_number} Verification Summary",
+    )
+
+
 def build_export_bundle(application, actor):
-    record_audit_event(
+    if not user_can_export_application(actor, application):
+        raise ValueError("You cannot export this application.")
+    bundle_root = _export_bundle_root(application)
+    generated_at = timezone.now()
+    evidence_exports = _collect_export_evidence(application, bundle_root)
+
+    application_summary_path = f"{bundle_root}records/application_summary.pdf"
+    submission_packet_path = f"{bundle_root}records/submission_packet.json"
+    manifest_path = f"{bundle_root}records/case_manifest.json"
+    inventory_csv_path = f"{bundle_root}inventory/evidence_inventory.csv"
+    inventory_pdf_path = f"{bundle_root}inventory/evidence_inventory.pdf"
+    audit_log_path = f"{bundle_root}logs/audit_log.csv"
+    routing_history_path = f"{bundle_root}logs/routing_history.csv"
+    verification_report_path = f"{bundle_root}verification/verification_report.json"
+    verification_checksums_path = f"{bundle_root}verification/checksums.sha256"
+    verification_summary_path = f"{bundle_root}verification/verification_summary.pdf"
+
+    archive_entries = {
+        application_summary_path: _build_application_pdf(
+            application,
+            actor=actor,
+            generated_at=generated_at,
+        ),
+        submission_packet_path: _submission_packet_json(application),
+        inventory_csv_path: _evidence_inventory_csv(
+            application,
+            actor,
+            generated_at,
+            evidence_exports,
+        ),
+        inventory_pdf_path: _build_evidence_inventory_pdf(
+            application,
+            actor,
+            generated_at,
+            evidence_exports,
+        ),
+        routing_history_path: _routing_history_csv(application),
+    }
+    for item in evidence_exports:
+        archive_entries[item["export_path"]] = item["file_bytes"]
+
+    planned_bundle_members = sorted(
+        [
+            *archive_entries.keys(),
+            audit_log_path,
+            manifest_path,
+            verification_report_path,
+            verification_checksums_path,
+            verification_summary_path,
+        ]
+    )
+    export_log = record_audit_event(
         application=application,
         actor=actor,
         action=AuditLog.Action.EXPORT_GENERATED,
         description="Generated controlled export package.",
-        metadata={"generated_at": timezone.now().isoformat()},
+        metadata={
+            "generated_at": generated_at.isoformat(),
+            "bundle_root": bundle_root,
+            "source_application_id": application.id,
+            "source_case_id": getattr(getattr(application, "case", None), "id", None),
+            "evidence_item_count": len(evidence_exports),
+            "bundle_member_count": len(planned_bundle_members),
+            "inventory_files": [inventory_csv_path, inventory_pdf_path],
+            "verification_files": [
+                verification_report_path,
+                verification_checksums_path,
+                verification_summary_path,
+            ],
+            "evidence_item_ids": [item["id"] for item in evidence_exports],
+        },
     )
+
+    archive_entries[audit_log_path] = _audit_log_csv(application)
+    archive_entries[manifest_path] = _manifest_json(
+        application,
+        actor=actor,
+        generated_at=generated_at,
+        bundle_root=bundle_root,
+        evidence_exports=evidence_exports,
+        bundle_members=planned_bundle_members,
+        audit_log_path=audit_log_path,
+        routing_history_path=routing_history_path,
+        inventory_paths=[inventory_csv_path, inventory_pdf_path],
+        verification_paths=[
+            verification_report_path,
+            verification_checksums_path,
+            verification_summary_path,
+        ],
+        submission_packet_path=submission_packet_path,
+        export_log=export_log,
+    )
+
+    verifiable_entries = dict(archive_entries)
+    verification_report_bytes, verification_payload = _verification_report_json(
+        application,
+        actor=actor,
+        generated_at=generated_at,
+        bundle_root=bundle_root,
+        verifiable_entries=verifiable_entries,
+        evidence_exports=evidence_exports,
+    )
+    archive_entries[verification_report_path] = verification_report_bytes
+    archive_entries[verification_checksums_path] = _verification_checksums_text(
+        verification_payload
+    )
+    archive_entries[verification_summary_path] = _build_verification_summary_pdf(
+        application,
+        actor,
+        generated_at,
+        verification_payload,
+    )
+
     zip_buffer = BytesIO()
     with zipfile.ZipFile(zip_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr(f"{application.reference_number}.pdf", _build_application_pdf(application))
-        archive.writestr("manifest.json", _manifest_json(application))
-        archive.writestr("audit_log.csv", _audit_log_csv(application))
+        for path, content in sorted(archive_entries.items()):
+            archive.writestr(path, content)
     zip_buffer.seek(0)
     return zip_buffer.getvalue()
 

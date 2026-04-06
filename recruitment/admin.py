@@ -4,13 +4,15 @@ from django.contrib.auth.admin import UserAdmin
 from .models import (
     AuditLog,
     ComparativeAssessmentReport,
-    ComparativeAssessmentReportItem,
+    CompletionRecord,
+    CompletionRequirement,
     DeliberationRecord,
     ExamRecord,
     EvidenceVaultItem,
     FinalDecision,
     InterviewRating,
     InterviewSession,
+    NotificationLog,
     Position,
     PositionPosting,
     RecruitmentApplication,
@@ -20,6 +22,13 @@ from .models import (
     ScreeningRecord,
     WorkflowOverride,
 )
+
+
+def _superuser_only_admin_site(request):
+    return bool(request.user.is_active and request.user.is_superuser)
+
+
+admin.site.has_permission = _superuser_only_admin_site
 
 
 @admin.register(RecruitmentUser)
@@ -55,20 +64,29 @@ class PositionPostingAdmin(admin.ModelAdmin):
     )
     list_filter = ("branch", "intake_mode", "level", "status")
     search_fields = ("job_code", "title", "unit", "position_reference__position_code")
+    inlines = []
 
 
 class EvidenceVaultItemInline(admin.TabularInline):
     model = EvidenceVaultItem
     extra = 0
     readonly_fields = (
-        "recruitment_case",
-        "workflow_stage",
-        "document_type",
         "label",
+        "stage",
+        "version_family",
+        "version_number",
+        "is_current_version",
+        "archive_tag",
+        "is_archived",
         "original_filename",
+        "digest_algorithm",
         "sha256_digest",
         "size_bytes",
         "uploaded_by",
+        "uploaded_by_role",
+        "archived_by",
+        "archived_by_role",
+        "archived_at",
         "created_at",
     )
     can_delete = False
@@ -81,7 +99,10 @@ class AuditLogInline(admin.TabularInline):
         "created_at",
         "actor",
         "actor_role",
+        "case_reference",
+        "workflow_stage",
         "action",
+        "is_sensitive_access",
         "description",
         "metadata",
     )
@@ -209,7 +230,7 @@ class ComparativeAssessmentReportInline(admin.TabularInline):
         "generated_by",
         "generated_by_role",
         "summary_notes",
-        "generation_count",
+        "version_number",
         "evidence_item",
         "is_finalized",
         "finalized_by",
@@ -235,6 +256,46 @@ class FinalDecisionInline(admin.TabularInline):
     can_delete = False
 
 
+PositionPostingAdmin.inlines = [ComparativeAssessmentReportInline]
+
+
+class NotificationLogInline(admin.TabularInline):
+    model = NotificationLog
+    extra = 0
+    readonly_fields = (
+        "created_at",
+        "notification_type",
+        "delivery_channel",
+        "delivery_status",
+        "recipient_email",
+        "subject",
+        "triggered_by",
+        "triggered_by_role",
+        "sent_at",
+        "failure_details",
+        "metadata",
+    )
+    can_delete = False
+
+
+class CompletionRecordInline(admin.TabularInline):
+    model = CompletionRecord
+    extra = 0
+    readonly_fields = (
+        "tracked_by",
+        "tracked_by_role",
+        "completion_reference",
+        "completion_date",
+        "deadline",
+        "announcement_reference",
+        "announcement_date",
+        "remarks",
+        "created_at",
+        "updated_at",
+    )
+    can_delete = False
+
+
 @admin.register(RecruitmentApplication)
 class RecruitmentApplicationAdmin(admin.ModelAdmin):
     list_display = (
@@ -246,9 +307,8 @@ class RecruitmentApplicationAdmin(admin.ModelAdmin):
         "level",
         "status",
         "current_handler_role",
-        "performance_rating_not_applicable",
     )
-    list_filter = ("branch", "level", "status", "current_handler_role", "performance_rating_not_applicable")
+    list_filter = ("branch", "level", "status", "current_handler_role")
     search_fields = (
         "reference_number",
         "applicant__username",
@@ -264,8 +324,9 @@ class RecruitmentApplicationAdmin(admin.ModelAdmin):
         InterviewSessionInline,
         InterviewRatingInline,
         DeliberationRecordInline,
-        ComparativeAssessmentReportInline,
         FinalDecisionInline,
+        CompletionRecordInline,
+        NotificationLogInline,
         RoutingHistoryInline,
         AuditLogInline,
     ]
@@ -295,25 +356,114 @@ class WorkflowOverrideAdmin(admin.ModelAdmin):
 @admin.register(EvidenceVaultItem)
 class EvidenceVaultItemAdmin(admin.ModelAdmin):
     list_display = (
-        "application",
-        "document_type",
         "label",
+        "artifact_scope",
+        "artifact_type",
+        "owner_reference",
+        "stage",
+        "version_number",
+        "is_current_version",
+        "is_archived",
         "original_filename",
         "size_bytes",
         "uploaded_by",
         "created_at",
     )
-    list_filter = ("workflow_stage", "document_type")
-    search_fields = ("application__reference_number", "document_type", "label", "original_filename")
-    readonly_fields = ("recruitment_case", "workflow_stage", "document_type", "sha256_digest", "nonce", "ciphertext")
+    list_filter = ("artifact_scope", "artifact_type", "stage", "is_current_version", "is_archived", "uploaded_by_role")
+    search_fields = (
+        "application__reference_number",
+        "recruitment_case__application__reference_number",
+        "recruitment_entry__job_code",
+        "recruitment_entry__title",
+        "label",
+        "original_filename",
+        "sha256_digest",
+        "archive_tag",
+        "uploaded_by__username",
+    )
+    readonly_fields = (
+        "application",
+        "recruitment_case",
+        "recruitment_entry",
+        "artifact_scope",
+        "artifact_type",
+        "stage",
+        "document_key",
+        "version_family",
+        "version_number",
+        "previous_version",
+        "is_current_version",
+        "digest_algorithm",
+        "sha256_digest",
+        "uploaded_by_role",
+        "archived_by_role",
+        "nonce",
+        "ciphertext",
+    )
+
+    @admin.display(description="Owner")
+    def owner_reference(self, obj):
+        if obj.application_id:
+            return obj.application.reference_number
+        if obj.recruitment_case_id:
+            return f"{obj.recruitment_case.application.reference_number} / case #{obj.recruitment_case_id}"
+        if obj.recruitment_entry_id:
+            return f"{obj.recruitment_entry.job_code} / {obj.recruitment_entry.title}"
+        return "-"
 
 
 @admin.register(AuditLog)
 class AuditLogAdmin(admin.ModelAdmin):
-    list_display = ("application", "action", "actor", "actor_role", "created_at")
-    list_filter = ("action", "actor_role")
-    search_fields = ("application__reference_number", "description", "actor__username")
-    readonly_fields = ("created_at", "metadata")
+    list_display = (
+        "case_reference",
+        "workflow_stage",
+        "action",
+        "actor",
+        "actor_role",
+        "is_sensitive_access",
+        "created_at",
+    )
+    list_filter = ("action", "actor_role", "workflow_stage", "is_sensitive_access")
+    search_fields = ("case_reference", "description", "actor__username", "workflow_stage")
+
+    def get_readonly_fields(self, request, obj=None):
+        return tuple(field.name for field in self.model._meta.fields)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(NotificationLog)
+class NotificationLogAdmin(admin.ModelAdmin):
+    list_display = (
+        "application",
+        "notification_type",
+        "delivery_channel",
+        "delivery_status",
+        "recipient_email",
+        "triggered_by",
+        "sent_at",
+        "created_at",
+    )
+    list_filter = ("notification_type", "delivery_channel", "delivery_status")
+    search_fields = (
+        "application__reference_number",
+        "recipient_email",
+        "subject",
+        "body",
+        "triggered_by__username",
+    )
+    readonly_fields = (
+        "created_at",
+        "updated_at",
+        "triggered_by_role",
+        "sent_at",
+        "failure_details",
+        "metadata",
+    )
 
 
 @admin.register(RoutingHistory)
@@ -365,125 +515,42 @@ class ExamRecordAdmin(admin.ModelAdmin):
     readonly_fields = ("created_at", "updated_at", "recorded_by_role", "finalized_by_role")
 
 
-@admin.register(InterviewSession)
-class InterviewSessionAdmin(admin.ModelAdmin):
-    list_display = (
-        "application",
-        "review_stage",
-        "scheduled_by",
-        "scheduled_for",
-        "location",
-        "is_finalized",
-        "finalized_at",
-    )
-    list_filter = ("review_stage", "branch", "level", "is_finalized")
-    search_fields = ("application__reference_number", "location", "session_notes", "scheduled_by__username")
-    readonly_fields = ("created_at", "updated_at", "scheduled_by_role", "finalized_by_role")
-
-
-@admin.register(InterviewRating)
-class InterviewRatingAdmin(admin.ModelAdmin):
-    list_display = (
-        "application",
-        "review_stage",
-        "rated_by",
-        "rating_score",
-        "created_at",
-    )
-    list_filter = ("review_stage", "branch", "level", "rated_by_role")
-    search_fields = ("application__reference_number", "rating_notes", "justification", "rated_by__username")
-    readonly_fields = ("created_at", "updated_at", "rated_by_role")
-
-
-class ComparativeAssessmentReportItemInline(admin.TabularInline):
-    model = ComparativeAssessmentReportItem
+class CompletionRequirementInline(admin.TabularInline):
+    model = CompletionRequirement
     extra = 0
-    readonly_fields = (
-        "application",
-        "recruitment_case",
-        "deliberation_record",
-        "rank_order",
-        "qualification_outcome",
-        "exam_status",
-        "exam_score",
-        "interview_average_score",
-        "decision_support_summary",
-        "created_at",
-    )
-    can_delete = False
 
 
-@admin.register(DeliberationRecord)
-class DeliberationRecordAdmin(admin.ModelAdmin):
+@admin.register(CompletionRecord)
+class CompletionRecordAdmin(admin.ModelAdmin):
     list_display = (
         "application",
-        "review_stage",
-        "recorded_by",
-        "ranking_position",
-        "is_finalized",
-        "finalized_at",
-    )
-    list_filter = ("review_stage", "branch", "level", "is_finalized")
-    search_fields = (
-        "application__reference_number",
-        "deliberation_minutes",
-        "decision_support_summary",
-        "ranking_notes",
-        "recorded_by__username",
-    )
-    readonly_fields = ("created_at", "updated_at", "recorded_by_role", "finalized_by_role", "consolidated_snapshot")
-
-
-@admin.register(ComparativeAssessmentReport)
-class ComparativeAssessmentReportAdmin(admin.ModelAdmin):
-    list_display = (
-        "application",
-        "recruitment_entry",
-        "review_stage",
-        "generated_by",
-        "generation_count",
-        "is_finalized",
-        "finalized_at",
-    )
-    list_filter = ("review_stage", "branch", "is_finalized")
-    search_fields = (
-        "application__reference_number",
-        "recruitment_entry__job_code",
-        "recruitment_entry__title",
-        "summary_notes",
-        "generated_by__username",
-    )
-    readonly_fields = (
-        "created_at",
+        "branch",
+        "tracked_by",
+        "completion_reference",
+        "completion_date",
+        "deadline",
         "updated_at",
-        "generated_by_role",
-        "finalized_by_role",
-        "consolidated_snapshot",
-        "generation_count",
     )
-    inlines = [ComparativeAssessmentReportItemInline]
-
-
-@admin.register(FinalDecision)
-class FinalDecisionAdmin(admin.ModelAdmin):
-    list_display = (
-        "application",
-        "decision_outcome",
-        "decided_by",
-        "review_stage",
-        "decided_at",
-    )
-    list_filter = ("decision_outcome", "branch", "level", "review_stage")
+    list_filter = ("branch", "level", "tracked_by_role")
     search_fields = (
         "application__reference_number",
-        "recruitment_entry__job_code",
-        "recruitment_entry__title",
-        "decision_notes",
-        "decided_by__username",
+        "completion_reference",
+        "announcement_reference",
+        "remarks",
+        "tracked_by__username",
     )
-    readonly_fields = (
-        "created_at",
+    readonly_fields = ("created_at", "updated_at", "tracked_by_role")
+    inlines = [CompletionRequirementInline]
+
+
+@admin.register(CompletionRequirement)
+class CompletionRequirementAdmin(admin.ModelAdmin):
+    list_display = (
+        "completion_record",
+        "item_label",
+        "status",
+        "display_order",
         "updated_at",
-        "decided_by_role",
-        "submission_packet_snapshot",
     )
+    list_filter = ("status",)
+    search_fields = ("completion_record__application__reference_number", "item_label", "notes")

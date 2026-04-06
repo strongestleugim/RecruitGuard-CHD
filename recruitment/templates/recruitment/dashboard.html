@@ -1,12 +1,12 @@
 {% extends "internal_base.html" %}
 {% load recruitment_ui %}
 
-{% block internal_content %}
+{% block content %}
 <div class="rg-page-header">
     <div>
-        <p class="rg-eyebrow">Internal Operations</p>
+        <p class="rg-eyebrow">Internal Portal</p>
         <h1 class="rg-page-title">Operations Dashboard</h1>
-        <p class="rg-page-copy">Institutional workspace for staff-facing recruitment operations, entry administration, case handling, and controlled records under one shared workflow engine.</p>
+        <p class="rg-page-copy">Shared backend workflow handling for Plantilla and COS, separated cleanly from the public-facing applicant portal.</p>
     </div>
     <div class="rg-page-actions">
         {% if request.user.role == "system_admin" %}
@@ -43,11 +43,6 @@
             <strong class="rg-kpi__value">Restricted</strong>
             <span class="rg-kpi__hint">Recruitment case content is not visible by default</span>
         </div>
-    </div>
-
-    <div class="rg-admin-note mb-4">
-        <strong>Administrative boundary</strong>
-        <p>System Administration remains limited to identity, access, and controlled platform configuration. Recruitment case content stays server-side restricted unless explicitly permitted by system rules.</p>
     </div>
 
     <div class="row g-4">
@@ -120,11 +115,6 @@
             <strong class="rg-kpi__value">Internal</strong>
             <span class="rg-kpi__hint">Public applicant functions remain outside this portal</span>
         </div>
-    </div>
-
-    <div class="rg-admin-note mb-4">
-        <strong>Operational boundary</strong>
-        <p>Cases, workflow routing, evaluation records, evidence handling, and exports remain internal-only. Public applicant intake, OTP verification, receipt, and status lookup stay outside this workspace.</p>
     </div>
 
     <div class="row g-4">
@@ -216,47 +206,4 @@
         </div>
     </div>
 {% endif %}
-
-<section class="mt-4">
-    <div class="rg-section__header">
-        <div>
-            <p class="rg-eyebrow">Internal Module Surface</p>
-            <h2 class="h4 mb-1">Unified operational architecture</h2>
-            <p class="rg-section-copy">The internal layout now supports the full staff-facing module structure even where some modules still share current case pages or await separate implementation.</p>
-        </div>
-    </div>
-
-    <div class="rg-module-grid">
-        <article class="rg-module-card">
-            <h3 class="rg-module-card__title">Screening / Evaluation</h3>
-            <p class="rg-module-card__copy">Qualification screening, completeness review, and evaluator notes are handled within protected case pages for authorized workflow staff.</p>
-            <span class="rg-pill rg-pill--info rg-module-card__meta">Active in case pages</span>
-        </article>
-        <article class="rg-module-card">
-            <h3 class="rg-module-card__title">Examination</h3>
-            <p class="rg-module-card__copy">Branch-aware examination recording, waivers, and finalization remain available as operational controls within case handling.</p>
-            <span class="rg-pill rg-pill--info rg-module-card__meta">Active in case pages</span>
-        </article>
-        <article class="rg-module-card">
-            <h3 class="rg-module-card__title">Interview / Ratings</h3>
-            <p class="rg-module-card__copy">Interview scheduling, authorized evaluator ratings, fallback uploads, and finalized lock behavior now operate directly within protected case pages.</p>
-            <span class="rg-pill rg-pill--info rg-module-card__meta">Active in case pages</span>
-        </article>
-        <article class="rg-module-card">
-            <h3 class="rg-module-card__title">Deliberation / Decision Support</h3>
-            <p class="rg-module-card__copy">Branch-aware deliberation records, consolidated outputs, ranking support, and Plantilla Comparative Assessment Reports now feed the decision path inside the same workflow engine.</p>
-            <span class="rg-pill rg-pill--info rg-module-card__meta">Active in case pages</span>
-        </article>
-        <article class="rg-module-card">
-            <h3 class="rg-module-card__title">Evidence Vault / Audit / Export</h3>
-            <p class="rg-module-card__copy">Encrypted records, routing history, case timelines, and controlled export remain part of the internal case workspace and role-based approval flow.</p>
-            <span class="rg-pill rg-pill--success rg-module-card__meta">Operational</span>
-        </article>
-        <article class="rg-module-card">
-            <h3 class="rg-module-card__title">System Administration</h3>
-            <p class="rg-module-card__copy">Internal account administration, password control, and role-based access oversight remain separated from public applicant functions and protected case content.</p>
-            <span class="rg-pill rg-pill--{% if request.user.role == 'system_admin' %}success{% else %}neutral{% endif %} rg-module-card__meta">{% if request.user.role == 'system_admin' %}Available{% else %}Restricted by role{% endif %}</span>
-        </article>
-    </div>
-</section>
 {% endblock %}

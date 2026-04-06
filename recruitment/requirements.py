@@ -100,4 +100,3 @@ def get_required_applicant_document_requirements(*, performance_rating_not_appli
         if requirement.is_required
         or (requirement.allow_not_applicable and not performance_rating_not_applicable)
     )
-

@@ -1,321 +1,90 @@
 {% extends "base.html" %}
-{% load static recruitment_ui %}
 
-{% block title %}Internal Portal | RecruitGuard-CHD{% endblock %}
+{% block title %}{% block internal_title %}Internal Portal{% endblock %} | RecruitGuard-CHD{% endblock %}
 {% block body_class %}internal-portal-body{% endblock %}
 
 {% block theme_styles %}
 :root {
-    --rg-primary: #0d4f73;
-    --rg-primary-strong: #083650;
-    --rg-secondary: #e9eef2;
-    --rg-accent: #8f6f16;
-    --rg-surface: #eef2f5;
+    --rg-primary: #005a87;
+    --rg-primary-strong: #004d72;
+    --rg-surface: #f5f6f7;
 }
 {% endblock %}
 
 {% block body_background %}
-background:
-    linear-gradient(180deg, #e7edf1 0%, #edf2f5 48%, #f3f6f8 100%);
+background: #f5f6f7;
 {% endblock %}
 
-{% block extra_styles %}
-.text-rg-primary {
-    color: var(--rg-primary) !important;
-}
-{% endblock %}
+{% block site_header %}{% endblock %}
 
-{% block main_class %}{% if request.user.is_authenticated and request.user.is_internal_user %}rg-internal-site-shell{% else %}rg-container py-4{% endif %}{% endblock %}
-
-{% block site_header %}
-    {% if not request.user.is_authenticated or not request.user.is_internal_user %}
-        <header class="rg-auth-topbar">
-            <div class="rg-container rg-auth-topbar__inner">
-                <a class="rg-auth-topbar__brand" href="{% url 'login' %}">
-                    <img src="{% static 'img/doh-chd-logo.jpg' %}" alt="DOH-CHD CALABARZON logo" class="rg-auth-topbar__logo">
-                    <span class="rg-auth-topbar__copy">
-                        <span class="rg-auth-topbar__kicker">Department of Health - CHD CALABARZON</span>
-                        <span class="rg-auth-topbar__title">RecruitGuard-CHD Internal Operations Portal</span>
-                    </span>
+{% block layout_wrapper %}
+<div class="rg-layout">
+    <nav class="rg-sidebar" id="internal-sidebar">
+        <a href="{% url 'dashboard' %}" class="rg-sidebar__brand">
+            <small>DOH–CHD CALABARZON</small>
+            RecruitGuard-CHD
+        </a>
+        <div class="rg-sidebar__nav">
+            <a href="{% url 'dashboard' %}" class="rg-sidebar__link {% if request.resolver_match.url_name == 'dashboard' %}is-active{% endif %}">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                Dashboard
+            </a>
+            <a href="{% url 'application-list' %}" class="rg-sidebar__link {% if request.resolver_match.url_name == 'application-list' or request.resolver_match.url_name == 'application-detail' %}is-active{% endif %}">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                Console
+            </a>
+            <a href="{% url 'evidence-vault-list' %}" class="rg-sidebar__link {% if request.resolver_match.url_name == 'evidence-vault-list' or request.resolver_match.url_name == 'audit-log-list' %}is-active{% endif %}">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                Evidence &amp; Audit
+            </a>
+            {% if user.profile.role == 'system_admin' %}
+                <a href="{% url 'recruitment-entry-list' %}" class="rg-sidebar__link {% if 'entry' in request.resolver_match.url_name or 'position' in request.resolver_match.url_name %}is-active{% endif %}">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+                    Entries &amp; Positions
                 </a>
-                <div class="rg-auth-topbar__actions">
-                    <a href="{% url 'applicant-portal' %}" class="btn btn-outline-secondary btn-sm">Applicant Portal</a>
-                    <a href="{% url 'applicant-status-lookup' %}" class="btn btn-outline-secondary btn-sm">Status Lookup</a>
-                </div>
-            </div>
-        </header>
-    {% endif %}
-{% endblock %}
-
-{% block content %}
-    {% if request.user.is_authenticated and request.user.is_internal_user %}
-            <div class="rg-internal-shell">
-                <aside class="rg-internal-sidebar">
-                    <div class="rg-internal-sidebar__header">
-                        <a class="rg-internal-brand" href="{% url 'dashboard' %}">
-                            <span class="rg-internal-brand__media">
-                                <img src="{% static 'img/doh-chd-banner.jpg' %}" alt="DOH-CHD CALABARZON banner" class="rg-internal-brand__banner">
-                                <span class="rg-internal-brand__seal-wrap">
-                                    <img src="{% static 'img/doh-chd-logo.jpg' %}" alt="DOH-CHD CALABARZON logo" class="rg-internal-brand__seal">
-                                </span>
-                            </span>
-                            <span class="rg-internal-brand__copy">
-                                <span class="rg-sidebar-kicker">Department of Health - CHD CALABARZON</span>
-                                <span class="rg-internal-brand__title">RecruitGuard-CHD</span>
-                                <span class="rg-internal-brand__subtitle">Internal recruitment operations portal</span>
-                            </span>
-                        </a>
-
-                        <div class="rg-sidebar-status">
-                            <span class="rg-pill rg-pill--{{ request.user.role|role_theme }}">{{ request.user.get_role_display }}</span>
-                            <span class="rg-sidebar-status__text">Authenticated staff workspace</span>
-                        </div>
-                    </div>
-
-                    <div class="rg-sidebar-panel">
-                        <p class="rg-sidebar-panel__title">Workspace Scope</p>
-                        <div class="rg-sidebar-summary">
-                            <div class="rg-sidebar-summary__row">
-                                <span>User</span>
-                                <strong>{% firstof request.user.get_full_name request.user.username %}</strong>
-                            </div>
-                            <div class="rg-sidebar-summary__row">
-                                <span>Office</span>
-                                <strong>{% firstof request.user.office_name "Not recorded" %}</strong>
-                            </div>
-                            <div class="rg-sidebar-summary__row">
-                                <span>Model</span>
-                                <strong>One platform | One database | One workflow engine</strong>
-                            </div>
-                        </div>
-                    </div>
-
-                    <nav class="rg-sidebar-nav" aria-label="Internal portal navigation">
-                        <div class="rg-sidebar-nav__section">
-                            <p class="rg-sidebar-nav__heading">Core Operations</p>
-                            <a href="{% url 'dashboard' %}" class="rg-sidebar-link {% if request.resolver_match.url_name == 'dashboard' %}is-active{% endif %}">
-                                <span class="rg-sidebar-link__label">Dashboard</span>
-                                <span class="rg-sidebar-link__meta">Operational summary and portal overview</span>
-                            </a>
-
-                            {% if request.user.role != "system_admin" %}
-                                <a href="{% url 'application-list' %}" class="rg-sidebar-link {% if request.resolver_match.url_name == 'application-list' or request.resolver_match.url_name == 'application-detail' %}is-active{% endif %}">
-                                    <span class="rg-sidebar-link__label">Cases</span>
-                                    <span class="rg-sidebar-link__meta">Application registry and case details</span>
-                                </a>
-                                <a href="{% url 'workflow-queue' %}" class="rg-sidebar-link {% if request.resolver_match.url_name == 'workflow-queue' %}is-active{% endif %}">
-                                    <span class="rg-sidebar-link__label">Workflow / Routing</span>
-                                    <span class="rg-sidebar-link__meta">Assigned queue, routing actions, and stage control</span>
-                                </a>
-                            {% else %}
-                                <div class="rg-sidebar-link rg-sidebar-link--placeholder">
-                                    <span class="rg-sidebar-link__label">Cases</span>
-                                    <span class="rg-sidebar-link__meta">Protected recruitment case content is not exposed by default to System Administration</span>
-                                </div>
-                                <div class="rg-sidebar-link rg-sidebar-link--placeholder">
-                                    <span class="rg-sidebar-link__label">Workflow / Routing</span>
-                                    <span class="rg-sidebar-link__meta">Workflow controls remain role-restricted for operational staff</span>
-                                </div>
-                            {% endif %}
-
-                            {% if request.user.role == "system_admin" or request.user.role == "secretariat" or request.user.role == "hrm_chief" %}
-                                <a href="{% url 'recruitment-entry-list' %}" class="rg-sidebar-link {% if 'recruitment-entry' in request.resolver_match.url_name %}is-active{% endif %}">
-                                    <span class="rg-sidebar-link__label">Recruitment Entries</span>
-                                    <span class="rg-sidebar-link__meta">Plantilla and COS entry administration</span>
-                                </a>
-                            {% else %}
-                                <div class="rg-sidebar-link rg-sidebar-link--placeholder">
-                                    <span class="rg-sidebar-link__label">Recruitment Entries</span>
-                                    <span class="rg-sidebar-link__meta">Available to Secretariat, HRM Chief, and System Administrator</span>
-                                </div>
-                            {% endif %}
-
-                            <a href="{% url 'position-list' %}" class="rg-sidebar-link {% if request.resolver_match.url_name == 'position-list' %}is-active{% endif %}">
-                                <span class="rg-sidebar-link__label">Open Entries</span>
-                                <span class="rg-sidebar-link__meta">Internal reference view of published openings</span>
-                            </a>
-                        </div>
-
-                        <div class="rg-sidebar-nav__section">
-                            <p class="rg-sidebar-nav__heading">Evaluation and Decisions</p>
-
-                            {% if request.resolver_match.url_name == 'application-detail' %}
-                                <a href="#screening-evaluation" class="rg-sidebar-link rg-sidebar-link--contextual">
-                                    <span class="rg-sidebar-link__label">Screening / Evaluation</span>
-                                    <span class="rg-sidebar-link__meta">Qualification and completeness review within the current case</span>
-                                </a>
-                                <a href="#examination" class="rg-sidebar-link rg-sidebar-link--contextual">
-                                    <span class="rg-sidebar-link__label">Examination</span>
-                                    <span class="rg-sidebar-link__meta">Exam recording and finalization for the current case</span>
-                                </a>
-                                <a href="#decision-controls" class="rg-sidebar-link rg-sidebar-link--contextual">
-                                    <span class="rg-sidebar-link__label">Interview / Ratings</span>
-                                    <span class="rg-sidebar-link__meta">Reserved module surface within case operations</span>
-                                </a>
-                                <a href="#decision-controls" class="rg-sidebar-link rg-sidebar-link--contextual">
-                                    <span class="rg-sidebar-link__label">Deliberation / Decision Support</span>
-                                    <span class="rg-sidebar-link__meta">Decision-stage support remains within controlled workflow handling</span>
-                                </a>
-                                <a href="#decision-controls" class="rg-sidebar-link rg-sidebar-link--contextual">
-                                    <span class="rg-sidebar-link__label">Decisions / Approval</span>
-                                    <span class="rg-sidebar-link__meta">Workflow decisions and approval control for the current case</span>
-                                </a>
-                            {% else %}
-                                <div class="rg-sidebar-link rg-sidebar-link--placeholder">
-                                    <span class="rg-sidebar-link__label">Screening / Evaluation</span>
-                                    <span class="rg-sidebar-link__meta">Rendered inside case pages for authorized workflow staff</span>
-                                </div>
-                                <div class="rg-sidebar-link rg-sidebar-link--placeholder">
-                                    <span class="rg-sidebar-link__label">Examination</span>
-                                    <span class="rg-sidebar-link__meta">Rendered inside case pages when examination handling applies</span>
-                                </div>
-                                <div class="rg-sidebar-link rg-sidebar-link--placeholder">
-                                    <span class="rg-sidebar-link__label">Interview / Ratings</span>
-                                    <span class="rg-sidebar-link__meta">Layout support reserved for later internal module expansion</span>
-                                </div>
-                                <div class="rg-sidebar-link rg-sidebar-link--placeholder">
-                                    <span class="rg-sidebar-link__label">Deliberation / Decision Support</span>
-                                    <span class="rg-sidebar-link__meta">Layout support reserved for later internal module expansion</span>
-                                </div>
-                                <div class="rg-sidebar-link rg-sidebar-link--placeholder">
-                                    <span class="rg-sidebar-link__label">Decisions / Approval</span>
-                                    <span class="rg-sidebar-link__meta">Current build records decisions through workflow controls and case actions</span>
-                                </div>
-                            {% endif %}
-                        </div>
-
-                        <div class="rg-sidebar-nav__section">
-                            <p class="rg-sidebar-nav__heading">Records and Control</p>
-
-                            <div class="rg-sidebar-link rg-sidebar-link--placeholder">
-                                <span class="rg-sidebar-link__label">Notifications</span>
-                                <span class="rg-sidebar-link__meta">Reserved operational space for internal notice tracking and dispatch</span>
-                            </div>
-                            <div class="rg-sidebar-link rg-sidebar-link--placeholder">
-                                <span class="rg-sidebar-link__label">Completion Tracking</span>
-                                <span class="rg-sidebar-link__meta">Reserved operational space for post-decision recruitment completion steps</span>
-                            </div>
-
-                            {% if request.resolver_match.url_name == 'application-detail' %}
-                                <a href="#evidence-vault-records" class="rg-sidebar-link rg-sidebar-link--contextual">
-                                    <span class="rg-sidebar-link__label">Evidence Vault / Records</span>
-                                    <span class="rg-sidebar-link__meta">Encrypted records, evidence metadata, and downloads for the current case</span>
-                                </a>
-                                <a href="#audit-logs" class="rg-sidebar-link rg-sidebar-link--contextual">
-                                    <span class="rg-sidebar-link__label">Audit Logs</span>
-                                    <span class="rg-sidebar-link__meta">Routing history and case timeline for the current case</span>
-                                </a>
-                            {% else %}
-                                <div class="rg-sidebar-link rg-sidebar-link--placeholder">
-                                    <span class="rg-sidebar-link__label">Evidence Vault / Records</span>
-                                    <span class="rg-sidebar-link__meta">Evidence and record controls are exposed within case pages</span>
-                                </div>
-                                <div class="rg-sidebar-link rg-sidebar-link--placeholder">
-                                    <span class="rg-sidebar-link__label">Audit Logs</span>
-                                    <span class="rg-sidebar-link__meta">Audit and routing history are surfaced within protected case views</span>
-                                </div>
-                            {% endif %}
-
-                            {% if request.user.role == "system_admin" %}
-                                <a href="{% url 'internal-user-list' %}" class="rg-sidebar-link {% if 'internal-user' in request.resolver_match.url_name or 'password-change' in request.resolver_match.url_name %}is-active{% endif %}">
-                                    <span class="rg-sidebar-link__label">System Administration</span>
-                                    <span class="rg-sidebar-link__meta">Internal user accounts, access control, and password administration</span>
-                                </a>
-                            {% else %}
-                                <div class="rg-sidebar-link rg-sidebar-link--placeholder">
-                                    <span class="rg-sidebar-link__label">System Administration</span>
-                                    <span class="rg-sidebar-link__meta">Restricted to the System Administrator role</span>
-                                </div>
-                            {% endif %}
-
-                            {% if request.resolver_match.url_name == 'application-detail' %}
-                                <a href="#decision-controls" class="rg-sidebar-link rg-sidebar-link--contextual">
-                                    <span class="rg-sidebar-link__label">Evidence Export</span>
-                                    <span class="rg-sidebar-link__meta">Controlled export remains role-based and case-specific</span>
-                                </a>
-                            {% else %}
-                                <div class="rg-sidebar-link rg-sidebar-link--placeholder">
-                                    <span class="rg-sidebar-link__label">Evidence Export</span>
-                                    <span class="rg-sidebar-link__meta">Available only in case views and only to authorized approval roles</span>
-                                </div>
-                            {% endif %}
-                        </div>
-                    </nav>
-
-                    <div class="rg-sidebar-panel rg-sidebar-panel--rules">
-                        <p class="rg-sidebar-panel__title">Routing Rules</p>
-                        <ul class="rg-sidebar-rule-list">
-                            <li>Level 1 -> Secretariat</li>
-                            <li>Level 2 -> HRM Chief</li>
-                            <li>Secretariat must not process Level 2 by default</li>
-                            <li>Controlled override must be authorized and audit-logged</li>
-                            <li>Plantilla follows the stricter workflow path</li>
-                            <li>COS remains the lighter internal path</li>
-                        </ul>
-                    </div>
-                </aside>
-
-                <div class="rg-internal-workspace">
-                    <header class="rg-workspace-topbar">
-                        <div class="rg-workspace-topbar__copy">
-                            <p class="rg-workspace-topbar__kicker">RecruitGuard-CHD Internal Operations Portal</p>
-                            <h2 class="rg-workspace-topbar__title">Staff-only administrative workspace for controlled recruitment handling</h2>
-                            <p class="rg-workspace-topbar__text">This portal keeps public applicant functions separate while maintaining one shared backend, one shared database, and one workflow engine across Plantilla and COS recruitment.</p>
-                        </div>
-
-                        <div class="rg-workspace-topbar__actions">
-                            <div class="rg-workspace-user">
-                                <span class="rg-workspace-user__avatar">{{ request.user.username|slice:":1"|upper }}</span>
-                                <div class="rg-workspace-user__details">
-                                    <strong>{% firstof request.user.get_full_name request.user.username %}</strong>
-                                    <span>{{ request.user.get_role_display }}{% if request.user.office_name %} | {{ request.user.office_name }}{% endif %}</span>
-                                    <span>Session date: {% now "F j, Y" %}</span>
-                                </div>
-                            </div>
-                            <div class="rg-workspace-topbar__buttons">
-                                <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary btn-sm">Dashboard</a>
-                                {% if request.user.role != "system_admin" %}
-                                    <a href="{% url 'workflow-queue' %}" class="btn btn-outline-secondary btn-sm">My Queue</a>
-                                {% endif %}
-                                <a href="{% url 'password-change' %}" class="btn btn-outline-secondary btn-sm">Password</a>
-                                <a href="{% url 'applicant-portal' %}" class="btn btn-outline-secondary btn-sm">Applicant Portal</a>
-                                <form method="post" action="{% url 'logout' %}">
-                                    {% csrf_token %}
-                                    <button type="submit" class="btn btn-rg-primary btn-sm">Logout</button>
-                                </form>
-                            </div>
-                        </div>
-                    </header>
-
-                    <div class="rg-workspace-strip" aria-label="Internal portal rules">
-                        <div class="rg-workspace-strip__item">
-                            <span class="rg-workspace-strip__label">Platform</span>
-                            <strong>One platform</strong>
-                        </div>
-                        <div class="rg-workspace-strip__item">
-                            <span class="rg-workspace-strip__label">Data</span>
-                            <strong>One database</strong>
-                        </div>
-                        <div class="rg-workspace-strip__item">
-                            <span class="rg-workspace-strip__label">Workflow</span>
-                            <strong>One workflow engine</strong>
-                        </div>
-                        <div class="rg-workspace-strip__item">
-                            <span class="rg-workspace-strip__label">Branches</span>
-                            <strong>Plantilla + COS</strong>
-                        </div>
-                    </div>
-
-                    <section class="rg-workspace-body">
-        {% else %}
-        <div class="rg-auth-page-shell">
-        {% endif %}
-                        {% block internal_content %}{% endblock %}
-        {% if request.user.is_authenticated and request.user.is_internal_user %}
-                    </section>
-                </div>
-            </div>
-        {% else %}
+                <a href="{% url 'internal-user-list' %}" class="rg-sidebar__link {% if 'user' in request.resolver_match.url_name %}is-active{% endif %}">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    User Management
+                </a>
+            {% endif %}
         </div>
+        <div class="rg-sidebar__footer">
+            <a href="{% url 'password-change' %}" class="rg-sidebar__link">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                Settings
+            </a>
+            <form method="post" action="{% url 'logout' %}" class="mt-1">
+                {% csrf_token %}
+                <button type="submit" class="rg-sidebar__link" style="background:none;border:none;width:100%;text-align:left;cursor:pointer;color:#dc2626;">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                    Sign Out
+                </button>
+            </form>
+        </div>
+    </nav>
+
+    <div class="rg-main-area">
+        <div class="rg-context-bar">
+            <span class="rg-context-bar__role">Role: <strong>{{ user.profile.get_role_display|default:"Unknown" }}</strong></span>
+            <div class="rg-context-bar__actions">
+                <span class="rg-user-pill">{{ user.get_full_name|default:user.username }}</span>
+            </div>
+        </div>
+
+        {% if messages %}
+            <div class="rg-message-stack" style="padding:0 1.5rem;margin-top:.75rem;">
+                {% for message in messages %}
+                    <div class="alert alert-{{ message.tags|default:'info' }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                {% endfor %}
+            </div>
         {% endif %}
+
+        <div class="rg-main-content">
+            {% block content %}{% endblock %}
+        </div>
+    </div>
+</div>
 {% endblock %}

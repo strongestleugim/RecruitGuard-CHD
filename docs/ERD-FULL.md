@@ -1,628 +1,563 @@
-# RecruitGuard-CHD Functional Requirements Specification
+# Finalized ERD Specification
 
-## 1. System Overview
+This document contains the full finalized ERD specification for RecruitGuard-CHD.
 
-RecruitGuard-CHD is a secure-by-design web-based recruitment management system for DOH–CHD CALABARZON. It supports both *Plantilla* and *Contract of Service (COS)* recruitment within one shared platform, one shared database, and one shared workflow engine. The system applies *branch-aware workflow handling* so that Plantilla and COS are not forced into one identical linear process. It also applies *level-aware internal routing* so that recruitment cases are assigned according to the recorded position level or routing basis.
+---
 
-### Direct Actors
-- Applicant
+## 1. Applicant
+
+### Purpose
+Stores the identity and contact information of external applicants who submit applications through the applicant portal.
+
+### Attributes
+- applicant_id (PK)
+- first_name
+- middle_name
+- last_name
+- email
+- mobile_number
+- address
+- created_at
+- updated_at
+
+### Relationships
+- One Applicant can have many Applications
+
+### Cardinality
+- Applicant 1 : M Application
+
+---
+
+## 2. InternalUser
+
+### Purpose
+Stores internal system users who participate in the recruitment workflow.
+
+### Attributes
+- user_id (PK)
+- full_name
+- email
+- password_hash
+- role_type
+- is_active
+- created_at
+- updated_at
+- last_login_at
+
+### Notes
+role_type covers:
 - Secretariat
 - HRM Chief
 - HRMPSB Member
 - Appointing Authority
 - System Administrator
 
-### Level-Aware Routing Rule
-- Level 1 -> Secretariat
-- Level 2 -> HRM Chief
-- Secretariat must not process Level 2 cases
-- Controlled routing override is allowed only if explicitly implemented and audit-logged
-
-### COS Rule
-COS remains a *lighter flexible path* than Plantilla. It does not introduce a new actor beyond the locked actor set and will be handled by the existing internal roles, primarily the Secretariat and HRM Chief.
-
-### Scope Boundary
-The system is bounded to *recruitment handling only*. Full onboarding, offboarding, payroll, termination, and general employee lifecycle management are out of scope.
-
----
-
-## 2. Technology Basis
-
-The system will be developed using the following locked technology stack:
-
-- Python 3
-- Django
-- Django Templates
-- Bootstrap
-- PostgreSQL
-- Gmail SMTP via Django email backend
-- Python hashlib for SHA-256
-- Python cryptography for AES-256-GCM
-- ReportLab
-- Python zipfile
-
-Future deployment target:
-- DigitalOcean Droplet
-- Ubuntu 22.04 LTS
-- Nginx
-- Gunicorn
-
-Security testing tools:
-- OWASP ZAP
-- Burp Suite Community
-- Bandit
-- pip-audit
+### Relationships
+- One InternalUser can have many CaseAssignment records
+- One InternalUser can have many ScreeningReview records
+- One InternalUser can have many ExamRecord entries
+- One InternalUser can have many InterviewRating entries
+- One InternalUser can have many DeliberationRecord entries
+- One InternalUser can have many ComparativeAssessmentReport generated entries
+- One InternalUser can have many FinalDecision entries
+- One InternalUser can have many EvidenceVaultItem uploads
+- One InternalUser can have many AuditLog entries
 
 ---
 
-## 3. Global Functional Principles
+## 3. Position
 
-### 3.1 Shared Platform Principle
-The system operates as one shared recruitment platform supporting both Plantilla and COS workflows.
+### Purpose
+Stores reusable position titles and their usual classification references.
 
-### 3.2 Branch-Aware Workflow Principle
-The system applies different internal workflow rules for Plantilla and COS while preserving one workflow engine.
+### Attributes
+- position_id (PK)
+- position_title
+- usual_level
+- description
+- is_active
 
-### 3.3 Level-Aware Routing Principle
-The system uses level classification or routing basis as an internal workflow control for case handling.
+### Relationships
+- One Position can have many RecruitmentEntry records
 
-### 3.4 Role-Based Access Principle
-The system enforces role-based access so that each internal actor sees and performs only the functions relevant to that role.
-
-### 3.5 Stage-Based Workflow Principle
-The system enforces stage progression and prevents stage skipping unless explicitly allowed by controlled system rules.
-
-### 3.6 Evidence Integrity Principle
-The system preserves uploaded and generated records as controlled recruitment artifacts with metadata, version preservation, and integrity support.
-
-### 3.7 Accountability Principle
-The system records security-relevant and workflow-relevant actions in an audit trail.
+### Cardinality
+- Position 1 : M RecruitmentEntry
 
 ---
 
-# 4. Finalized Module-Based Specification
+## 4. RecruitmentEntry
+
+### Purpose
+Represents the recruitment opening or entry point for either Plantilla or COS.
+
+### Attributes
+- entry_id (PK)
+- position_id (FK -> Position.position_id)
+- engagement_type
+- entry_mode
+- routing_basis
+- status
+- publication_start_date
+- publication_end_date
+- intake_mode
+- created_by (FK -> InternalUser.user_id)
+- created_at
+- updated_at
+
+### Notes
+Possible values:
+- engagement_type: Plantilla, COS
+- entry_mode: Published Vacancy, COS Opening, COS Pooling
+- intake_mode: Fixed Window, Continuous, Pooling
+
+### Relationships
+- One RecruitmentEntry belongs to one Position
+- One RecruitmentEntry can have many Applications
+- One RecruitmentEntry can have many InterviewSession records
+- One RecruitmentEntry can have many DeliberationRecord records
+- One RecruitmentEntry can have many ComparativeAssessmentReport records
+- One RecruitmentEntry can have many FinalDecision records
+- One RecruitmentEntry can have many EvidenceVaultItem records
+- One RecruitmentEntry can have many AuditLog records
+
+### Cardinality
+- Position 1 : M RecruitmentEntry
+- RecruitmentEntry 1 : M Application
+- RecruitmentEntry 1 : M InterviewSession
+- RecruitmentEntry 1 : M DeliberationRecord
+- RecruitmentEntry 1 : M ComparativeAssessmentReport
+- RecruitmentEntry 1 : M FinalDecision
+- RecruitmentEntry 1 : M EvidenceVaultItem
+- RecruitmentEntry 1 : M AuditLog
 
 ---
 
-# Module 1. Identity and Access Control
+## 5. Application
 
-## Purpose
-Controls authenticated access to the system and enforces role-based permissions for internal users.
+### Purpose
+Represents the applicant’s submitted application to a specific recruitment entry.
 
-## Primary Actors
-- Secretariat
-- HRM Chief
-- HRMPSB Member
-- Appointing Authority
-- System Administrator
+### Attributes
+- application_id (PK)
+- applicant_id (FK -> Applicant.applicant_id)
+- entry_id (FK -> RecruitmentEntry.entry_id)
+- application_code
+- otp_verified_at
+- completeness_status
+- next_in_rank_flag
+- for_pooling_flag
+- submission_status
+- submitted_at
+- updated_at
 
-## Technology Basis
-- Django authentication system
-- Django session handling
-- PostgreSQL user records
-- Bootstrap-based login and access pages
+### Relationships
+- One Application belongs to one Applicant
+- One Application belongs to one RecruitmentEntry
+- One Application creates one RecruitmentCase
+- One Application can have many EvidenceVaultItem records
 
-## Detailed Functional Requirements
-
-### a. Internal User Authentication
-i. System shall allow authorized internal users to log in using registered credentials.  
-ii. System shall deny access to protected system pages when authentication is unsuccessful.  
-iii. System shall support authenticated access for the following internal roles: Secretariat, HRM Chief, HRMPSB Member, Appointing Authority, and System Administrator.  
-iv. System shall terminate or invalidate sessions according to configured session control rules.  
-
-### b. Password and Session Security
-i. Passwords shall be stored using secure hashing and shall not be stored in plain text.  
-ii. System shall support password change for authenticated users.  
-iii. System shall enforce protected session handling to reduce unauthorized reuse of authenticated access.  
-iv. System shall force logout or session refresh where account privilege changes require renewed access control enforcement.  
-
-### c. Role-Based Access Control
-i. System shall enforce role-based access so that users can access only the functions, records, and pages allowed for their role.  
-ii. Least privilege principle shall be applied across all internal system functions.  
-iii. Role assignment and modification shall be restricted to authorized administrative functions.  
-iv. System Administrator shall not have default access to recruitment case content unless explicitly permitted by system rules.  
-
-### d. Account Administration
-i. Authorized administrative functions shall support creation of internal user accounts.  
-ii. Authorized administrative functions shall support activation, deactivation, and update of internal user accounts.  
-iii. System shall preserve deactivated accounts for traceability and audit purposes.  
-iv. Account and role-related changes shall be recorded in the audit log.  
+### Cardinality
+- Applicant 1 : M Application
+- RecruitmentEntry 1 : M Application
+- Application 1 : 1 RecruitmentCase
+- Application 1 : M EvidenceVaultItem
 
 ---
 
-# Module 2. Recruitment Entry and Vacancy Management
+## 6. RecruitmentCase
 
-## Purpose
-Manages recruitment entries for both Plantilla and COS.
+### Purpose
+Represents the internal processing container created from an application.
 
-## Primary Actors
-- Secretariat
-- HRM Chief
-- System Administrator
+### Attributes
+- case_id (PK)
+- application_id (FK, unique -> Application.application_id)
+- assigned_branch
+- routing_basis
+- current_stage
+- case_status
+- current_handler_role
+- stage_locked_flag
+- created_at
+- updated_at
+- closed_at
 
-## Technology Basis
-- Django models and forms
-- PostgreSQL entry records
-- Django Templates + Bootstrap for entry management pages
+### Relationships
+- One RecruitmentCase belongs to one Application
+- One RecruitmentCase can have many CaseAssignment records
+- One RecruitmentCase can have many ScreeningReview records
+- One RecruitmentCase can have many ExamRecord entries
+- One RecruitmentCase can have many InterviewRating records
+- One RecruitmentCase can appear in many ComparativeAssessmentReportItem records
+- One RecruitmentCase may have one CompletionRecord
+- One RecruitmentCase can have many EvidenceVaultItem records
+- One RecruitmentCase can have many AuditLog records
 
-## Detailed Functional Requirements
-
-### a. Plantilla and COS Recruitment Entry Creation
-i. System shall allow creation of Plantilla recruitment entries.  
-ii. System shall allow creation of COS recruitment entries.  
-iii. COS entries shall support opening-based and pooling-based intake handling.  
-iv. Each recruitment entry shall store position title, engagement type, and level classification or routing basis.  
-
-### b. Publication, Opening, and Intake Status
-i. System shall record publication or opening data for each recruitment entry.  
-ii. Plantilla entries shall support fixed validity periods for intake.  
-iii. COS entries shall support continuous, active, or pooling-based intake while the entry remains active.  
-iv. System shall allow authorized users to activate, suspend, update, and close recruitment entries.  
-
-### c. Entry Metadata and Qualification Reference
-i. System shall preserve recruitment metadata necessary for downstream workflow handling.  
-ii. Plantilla entries shall support qualification-related fields where applicable.  
-iii. System shall record the creator and last updater of each entry together with timestamps.  
-iv. Entry status changes shall be recorded in the audit log.  
-
----
-
-# Module 3. Applicant Intake and OTP Verification
-
-## Purpose
-Supports the applicant-facing portal and accountless submission process.
-
-## Primary Actor
-- Applicant
-
-## Technology Basis
-- Django forms
-- Gmail SMTP via Django email backend
-- OTP workflow logic
-- Bootstrap-based applicant portal UI
-
-## Detailed Functional Requirements
-
-### a. Shared Applicant Portal
-i. System shall provide a shared applicant-facing portal.  
-ii. Applicant shall be able to choose between Plantilla and COS application paths.  
-iii. System shall load the corresponding intake flow after the applicant selects the intended recruitment path.  
-
-### b. Accountless Application Submission
-i. System shall support accountless submission of applications.  
-ii. Applicant shall be able to encode required submission information based on the selected recruitment path.  
-iii. System shall require completion of a submission checklist before final submission.  
-iv. Submission data shall be bound to the selected recruitment entry.  
-
-### c. OTP Verification
-i. System shall send an OTP to the applicant’s registered email prior to final submission.  
-ii. Final application submission shall require valid OTP verification.  
-iii. OTP verification data shall be stored in hashed form and shall expire after a defined duration.  
-iv. Unverified or invalid OTP submissions shall not be finalized.  
-
-### d. Submission Finalization
-i. System shall generate a unique Application ID for each final submission.  
-ii. System shall record submission status and timestamp upon successful intake.  
-iii. System shall preserve the finalized submission as the basis for recruitment case creation.  
+### Cardinality
+- Application 1 : 1 RecruitmentCase
+- RecruitmentCase 1 : M CaseAssignment
+- RecruitmentCase 1 : M ScreeningReview
+- RecruitmentCase 1 : M ExamRecord
+- RecruitmentCase 1 : M InterviewRating
+- RecruitmentCase 1 : M ComparativeAssessmentReportItem
+- RecruitmentCase 1 : 0..1 CompletionRecord
+- RecruitmentCase 1 : M EvidenceVaultItem
+- RecruitmentCase 1 : M AuditLog
 
 ---
 
-# Module 4. Recruitment Case Management and Workflow Engine
+## 7. CaseAssignment
 
-## Purpose
-Transforms valid submissions into internal recruitment cases and enforces workflow progression.
+### Purpose
+Preserves routing and assignment history of recruitment cases.
 
-## Primary Actors
-- Secretariat
-- HRM Chief
-- System Administrator
+### Attributes
+- assignment_id (PK)
+- case_id (FK -> RecruitmentCase.case_id)
+- assigned_to_user_id (FK -> InternalUser.user_id)
+- assigned_role
+- assignment_reason
+- is_override
+- assigned_by_user_id (FK -> InternalUser.user_id)
+- assigned_at
+- ended_at
 
-## Technology Basis
-- Django workflow logic
-- PostgreSQL case records
-- Stage state tracking in database
-- Timeline and case history views
+### Relationships
+- One CaseAssignment belongs to one RecruitmentCase
+- One CaseAssignment refers to one assigned InternalUser
+- One CaseAssignment may refer to one assigning InternalUser
 
-## Detailed Functional Requirements
-
-### a. Recruitment Case Creation
-i. System shall create one recruitment case for each valid submitted application.  
-ii. Recruitment case shall be linked to the applicant, application, and recruitment entry.  
-iii. System shall store current stage, branch type, and case status for each recruitment case.  
-
-### b. Stage-Based Workflow Progression
-i. System shall enforce defined workflow stages for each recruitment case.  
-ii. System shall prevent stage skipping.  
-iii. System shall require defined prerequisites before stage advancement.  
-iv. Workflow rules shall differ according to Plantilla or COS branch where applicable.  
-
-### c. Stage Locking and Controlled Reopen
-i. System shall stage-lock finalized outputs where applicable.  
-ii. Stage-locked records shall not be editable through ordinary user actions.  
-iii. Controlled reopening shall be allowed only through authorized action.  
-iv. Reopen action, actor, timestamp, and reason shall be recorded in the audit log.  
-
-### d. Case Timeline and Status History
-i. System shall provide a timeline or history view for each recruitment case.  
-ii. Timeline shall display stage changes, case actions, and status transitions.  
-iii. Case history shall remain available for later review and traceability.  
+### Cardinality
+- RecruitmentCase 1 : M CaseAssignment
+- InternalUser 1 : M CaseAssignment
 
 ---
 
-# Module 5. Branch-Aware and Level-Aware Routing
+## 8. ScreeningReview
 
-## Purpose
-Applies routing rules based on recruitment branch and position level.
+### Purpose
+Stores completeness and qualification screening outputs.
 
-## Primary Actors
-- Secretariat
-- HRM Chief
-- System Administrator
+### Attributes
+- screening_id (PK)
+- case_id (FK -> RecruitmentCase.case_id)
+- reviewer_user_id (FK -> InternalUser.user_id)
+- completeness_decision
+- qualification_decision
+- screening_score
+- remarks
+- finalized_at
+- locked_flag
 
-## Technology Basis
-- Django server-side authorization and routing logic
-- PostgreSQL routing records
-- Audit logging integration
+### Relationships
+- One ScreeningReview belongs to one RecruitmentCase
+- One ScreeningReview belongs to one reviewer InternalUser
 
-## Detailed Functional Requirements
-
-### a. Branch Routing
-i. System shall support one shared workflow engine while applying different internal logic for Plantilla and COS cases.  
-ii. Plantilla cases shall follow the stricter policy-aware recruitment path.  
-iii. COS cases shall follow a lighter flexible path consistent with the study scope.  
-
-### b. Level-Aware Internal Routing
-i. System shall use level classification or routing basis as an internal routing control.  
-ii. Level 1 cases shall be routed to the Secretariat.  
-iii. Level 2 cases shall be routed to the HRM Chief.  
-iv. The same routing logic may be applied to COS as an internal office control.  
-
-### c. Routing Restrictions and Override
-i. Secretariat shall be prevented from processing Level 2 cases.  
-ii. Authorized routing override shall be supported only through controlled action.  
-iii. All routing and override actions shall be logged.  
+### Cardinality
+- RecruitmentCase 1 : M ScreeningReview
+- InternalUser 1 : M ScreeningReview
 
 ---
 
-# Module 6. Document Review and Qualification Screening
+## 9. ExamRecord
 
-## Purpose
-Supports completeness checking and qualification-related review of applications.
+### Purpose
+Stores exam-related records where applicable.
 
-## Primary Actors
-- Secretariat
-- HRM Chief
+### Attributes
+- exam_id (PK)
+- case_id (FK -> RecruitmentCase.case_id)
+- exam_type
+- score
+- validity_end_date
+- waiver_flag
+- absence_flag
+- remarks
+- encoded_by_user_id (FK -> InternalUser.user_id)
+- encoded_at
 
-## Technology Basis
-- Django forms and case views
-- PostgreSQL screening records
+### Relationships
+- One ExamRecord belongs to one RecruitmentCase
+- One ExamRecord may be encoded by one InternalUser
 
-## Detailed Functional Requirements
-
-### a. Completeness Review
-i. Authorized internal handler shall be able to review application completeness.  
-ii. System shall record completeness findings and screening notes.  
-iii. Qualified and not-qualified outcomes shall be supported where applicable.  
-
-### b. Qualification-Related Review
-i. System shall support qualification checking according to the selected recruitment path and position requirements.  
-ii. Screening remarks and internal notes shall be storable per case.  
-iii. Screening outputs shall be preserved as part of the recruitment case record.  
-
-### c. Screening Finalization
-i. Screening outputs shall be finalizable before progression to the next stage.  
-ii. Finalized screening outputs shall be stage-locked.  
-iii. Screening finalization actions shall be recorded in the audit log.  
+### Cardinality
+- RecruitmentCase 1 : M ExamRecord
+- InternalUser 1 : M ExamRecord
 
 ---
 
-# Module 7. Examination Management
+## 10. InterviewSession
 
-## Purpose
-Manages examination data where applicable.
+### Purpose
+Stores interview scheduling and session information.
 
-## Primary Actors
-- Secretariat
-- HRM Chief
+### Attributes
+- session_id (PK)
+- entry_id (FK -> RecruitmentEntry.entry_id)
+- scheduled_date
+- scheduled_time
+- venue_or_mode
+- quorum_status
+- created_by_user_id (FK -> InternalUser.user_id)
+- created_at
 
-## Technology Basis
-- Django exam record forms
-- PostgreSQL exam storage
+### Relationships
+- One InterviewSession belongs to one RecruitmentEntry
+- One InterviewSession can have many InterviewRating records
 
-## Detailed Functional Requirements
-
-### a. Examination Record Handling
-i. System shall support creation of examination records where applicable.  
-ii. Examination type and result shall be recordable per case.  
-iii. Examination stage shall be applied according to branch-specific workflow rules where applicable.  
-
-### b. Examination Status and Validity
-i. System shall support recording of examination validity period where applicable.  
-ii. System shall allow recording of waiver or absence status where applicable.  
-iii. Examination-related remarks shall be storable per case.  
-
-### c. Examination Output Preservation
-i. Examination results shall be preserved as part of the recruitment case history.  
-ii. Finalized examination outputs shall be protected against unauthorized modification.  
-iii. Examination-related actions shall be traceable in the audit log.  
+### Cardinality
+- RecruitmentEntry 1 : M InterviewSession
+- InterviewSession 1 : M InterviewRating
 
 ---
 
-# Module 8. Interview and Rating Management
+## 11. InterviewRating
 
-## Purpose
-Manages interview scheduling, rating capture, and preservation of interview outputs.
+### Purpose
+Stores interview ratings associated with cases and sessions.
 
-## Primary Actors
-- Secretariat
-- HRM Chief
-- HRMPSB Member
+### Attributes
+- rating_id (PK)
+- session_id (FK -> InterviewSession.session_id)
+- case_id (FK -> RecruitmentCase.case_id)
+- member_user_id (FK -> InternalUser.user_id)
+- rating_score
+- justification_text
+- source_mode
+- encoded_at
+- locked_flag
 
-## Technology Basis
-- Django interview scheduling forms
-- Rating entry interfaces
-- PostgreSQL rating storage
-- File upload support for scanned fallback
+### Relationships
+- One InterviewRating belongs to one InterviewSession
+- One InterviewRating belongs to one RecruitmentCase
+- One InterviewRating belongs to one InternalUser evaluator
 
-## Detailed Functional Requirements
-
-### a. Interview Scheduling
-i. System shall allow scheduling of interview sessions.  
-ii. Interview session shall be linked to the appropriate recruitment case or recruitment entry.  
-iii. Interview stage shall support both Plantilla and COS where applicable.  
-
-### b. Interview Ratings
-i. Authorized evaluators shall be able to encode interview ratings.  
-ii. System shall support direct rating input according to the role and workflow branch.  
-iii. Rating justifications shall be recordable where required by workflow rules.  
-
-### c. Fallback Rating Handling
-i. System shall support scanned fallback rating sheet upload where applicable.  
-ii. Uploaded fallback rating files shall be linked to the corresponding case and stage.  
-iii. Finalized interview outputs shall be stage-locked.  
+### Cardinality
+- InterviewSession 1 : M InterviewRating
+- RecruitmentCase 1 : M InterviewRating
+- InternalUser 1 : M InterviewRating
 
 ---
 
-# Module 9. Deliberation and Decision Support
+## 12. DeliberationRecord
 
-## Purpose
-Consolidates evaluation outputs and produces decision-support artifacts.
+### Purpose
+Stores deliberation minutes and related deliberation artifacts.
 
-## Primary Actors
-- Secretariat
-- HRM Chief
-- HRMPSB Member
+### Attributes
+- deliberation_id (PK)
+- entry_id (FK -> RecruitmentEntry.entry_id)
+- minutes_text
+- recorded_by_user_id (FK -> InternalUser.user_id)
+- finalized_at
+- locked_flag
 
-## Technology Basis
-- Django consolidation logic
-- ReportLab for CAR generation
-- PostgreSQL storage for deliberation records
+### Relationships
+- One DeliberationRecord belongs to one RecruitmentEntry
+- One DeliberationRecord may be recorded by one InternalUser
 
-## Detailed Functional Requirements
-
-### a. Consolidation of Evaluation Outputs
-i. System shall consolidate finalized review, examination, and interview outputs where applicable.  
-ii. Consolidated records shall preserve references to locked source records.  
-iii. Consolidation shall support branch-appropriate decision-support handling.  
-
-### b. Deliberation Record Handling
-i. System shall support creation of deliberation records or equivalent minutes where applicable.  
-ii. Deliberation records shall be linked to the corresponding recruitment case or entry.  
-iii. Finalized deliberation records shall be preserved as controlled artifacts.  
-
-### c. Ranking and CAR
-i. System shall support ranking outputs where applicable.  
-ii. System shall generate the Comparative Assessment Report for Plantilla where applicable.  
-iii. Finalized CAR and decision-support artifacts shall be locked against ordinary modification.  
+### Cardinality
+- RecruitmentEntry 1 : M DeliberationRecord
+- InternalUser 1 : M DeliberationRecord
 
 ---
 
-# Module 10. Decision and Approval Handling
+## 13. ComparativeAssessmentReport
 
-## Purpose
-Records final decisions and manages approval-side actions.
+### Purpose
+Stores CAR header/version records where applicable, mainly for Plantilla.
 
-## Primary Actors
-- Appointing Authority
-- Secretariat
-- HRM Chief
+### Attributes
+- car_id (PK)
+- entry_id (FK -> RecruitmentEntry.entry_id)
+- version_no
+- generated_by_user_id (FK -> InternalUser.user_id)
+- generated_at
+- finalized_at
+- locked_flag
 
-## Technology Basis
-- Django decision forms
-- PostgreSQL decision records
+### Relationships
+- One ComparativeAssessmentReport belongs to one RecruitmentEntry
+- One ComparativeAssessmentReport can have many ComparativeAssessmentReportItem records
+- One ComparativeAssessmentReport may be generated by one InternalUser
 
-## Detailed Functional Requirements
-
-### a. Submission Packet Preparation
-i. System shall prepare a structured packet of decision-support outputs and evidence references where applicable.  
-ii. Submission packet shall preserve the current decision context of the recruitment case.  
-
-### b. Final Decision Recording
-i. Appointing Authority shall be able to record final decision actions for Plantilla where applicable.  
-ii. System shall support recording of selected and not-selected outcomes.  
-iii. Decision history shall be preserved as part of the case record.  
-
-### c. Pre-Decision Artifact Preservation
-i. System shall preserve pre-decision artifacts as read-only once a final decision is recorded.  
-ii. Decision actions and related timestamps shall be audit-logged.  
+### Cardinality
+- RecruitmentEntry 1 : M ComparativeAssessmentReport
+- ComparativeAssessmentReport 1 : M ComparativeAssessmentReportItem
+- InternalUser 1 : M ComparativeAssessmentReport
+- Each CAR row is an entry-scoped preserved version for the same review stage; ranked rows remain case-linked through ComparativeAssessmentReportItem.
 
 ---
 
-# Module 11. Notification Management
+## 14. ComparativeAssessmentReportItem
 
-## Purpose
-Manages applicant-facing notifications as a standalone feature.
+### Purpose
+Stores ranked rows associated with a CAR.
 
-## Primary Actors
-- Secretariat
-- HRM Chief
-- Applicant
+### Attributes
+- car_item_id (PK)
+- car_id (FK -> ComparativeAssessmentReport.car_id)
+- case_id (FK -> RecruitmentCase.case_id)
+- total_score
+- rank_no
+- remarks
 
-## Technology Basis
-- Django notification logic
-- Gmail SMTP email sending
-- PostgreSQL notification history
+### Relationships
+- One ComparativeAssessmentReportItem belongs to one ComparativeAssessmentReport
+- One ComparativeAssessmentReportItem refers to one RecruitmentCase
 
-## Detailed Functional Requirements
-
-### a. Submission and Status Notifications
-i. System shall support notification of successful application submission.  
-ii. System shall support status-related notifications where applicable.  
-iii. Notification history shall be preserved per application or case.  
-
-### b. Selection and Non-Selection Notifications
-i. System shall support selected-applicant notification.  
-ii. System shall support non-selected-applicant notification.  
-iii. Notification content shall reflect the branch-appropriate result.  
-
-### c. Requirement and Deadline Notifications
-i. System shall support requirement checklist notifications for selected applicants where applicable.  
-ii. System shall support deadline or reminder notifications where applicable.  
-iii. All sent notifications shall be traceable in system records.  
+### Cardinality
+- ComparativeAssessmentReport 1 : M ComparativeAssessmentReportItem
+- RecruitmentCase 1 : M ComparativeAssessmentReportItem
 
 ---
 
-# Module 12. Appointment and Contract Completion
+## 15. FinalDecision
 
-## Purpose
-Supports post-selection completion within recruitment scope.
+### Purpose
+Stores final decision outcomes where applicable.
 
-## Primary Actors
-- Secretariat
-- HRM Chief
+### Attributes
+- decision_id (PK)
+- entry_id (FK -> RecruitmentEntry.entry_id)
+- selected_case_id (FK -> RecruitmentCase.case_id, nullable)
+- decision_type
+- decided_by_user_id (FK -> InternalUser.user_id)
+- decision_date
+- remarks
 
-## Technology Basis
-- Django completion-tracking forms
-- PostgreSQL completion records
+### Relationships
+- One FinalDecision belongs to one RecruitmentEntry
+- One FinalDecision may refer to one selected RecruitmentCase
+- One FinalDecision may be made by one InternalUser
 
-## Detailed Functional Requirements
-
-### a. Plantilla Completion Tracking
-i. System shall support appointment-related completion tracking for Plantilla.  
-ii. System shall support recording of requirement checklist status for selected Plantilla cases.  
-iii. Announcement record storage shall be supported where applicable.  
-
-### b. COS Completion Tracking
-i. System shall support contract-related completion tracking for COS.  
-ii. System shall support recording of requirement checklist status for selected COS cases.  
-iii. Contract-completion records shall be preserved as part of the recruitment case.  
-
-### c. Case Closure
-i. System shall support closure of recruitment cases after completion and record handling are finished.  
-ii. Closed cases shall remain retrievable for later review.  
-iii. Full onboarding shall remain out of scope of the current system.  
+### Cardinality
+- RecruitmentEntry 1 : M FinalDecision
+- RecruitmentCase 0..1 : M FinalDecision references
+- InternalUser 1 : M FinalDecision
 
 ---
 
-# Module 13. Evidence Vault and Record Management
+## 16. CompletionRecord
 
-## Purpose
-Stores and manages recruitment artifacts and records.
+### Purpose
+Stores appointment-related or contract-related completion tracking within recruitment scope.
 
-## Primary Actors
-- Secretariat
-- HRM Chief
-- HRMPSB Member
-- Appointing Authority
+### Attributes
+- completion_id (PK)
+- case_id (FK -> RecruitmentCase.case_id, unique)
+- completion_type
+- requirements_status
+- deadline_status
+- announcement_record_flag
+- completed_at
+- closure_notes
 
-## Technology Basis
-- PostgreSQL metadata records
-- Django file handling
-- SHA-256 via hashlib
-- AES-256-GCM via cryptography for selected sensitive stored data
+### Relationships
+- One CompletionRecord belongs to one RecruitmentCase
 
-## Detailed Functional Requirements
-
-### a. Centralized Evidence Storage
-i. System shall store uploaded recruitment artifacts in a centralized Evidence Vault.  
-ii. Stored artifacts shall be linked to case, stage, uploader, and timestamp metadata.  
-iii. Selected sensitive stored data shall be protected using authenticated encryption where applicable.  
-
-### b. Version Preservation and Retrieval
-i. System shall preserve evidence versions without silent overwrite.  
-ii. System shall support searchable retrieval of stored recruitment records.  
-iii. System shall support archival tagging and retention-related handling within study scope.  
-
-### c. Evidence Integrity
-i. System shall generate SHA-256 hash values for evidence-related files where applicable.  
-ii. System shall preserve integrity metadata needed for later verification.  
-iii. Controlled evidence-handling events shall be traceable in the audit log.  
+### Cardinality
+- RecruitmentCase 1 : 0..1 CompletionRecord
 
 ---
 
-# Module 14. Audit Logging and Traceability
+## 17. EvidenceVaultItem
 
-## Purpose
-Provides recruitment-grade accountability and traceability.
+### Purpose
+Stores uploaded and generated recruitment artifacts and evidence files.
 
-## Primary Actors
-- All internal roles
-- System Administrator
+### Attributes
+- artifact_id (PK)
+- application_id (FK -> Application.application_id, nullable)
+- case_id (FK -> RecruitmentCase.case_id, nullable)
+- entry_id (FK -> RecruitmentEntry.entry_id, nullable)
+- ownership_scope
+- artifact_type
+- stage_name
+- file_name
+- file_path
+- sha256_hash
+- version_no
+- uploaded_by_user_id (FK -> InternalUser.user_id, nullable)
+- uploaded_at
 
-## Technology Basis
-- PostgreSQL audit log storage
-- Django server-side event logging
+### Relationships
+- One EvidenceVaultItem may belong to one Application
+- One EvidenceVaultItem may belong to one RecruitmentCase
+- One EvidenceVaultItem may belong to one RecruitmentEntry
+- One EvidenceVaultItem may be uploaded by one InternalUser
 
-## Detailed Functional Requirements
-
-### a. Workflow and Security Event Logging
-i. System shall maintain recruitment-grade audit logs for critical workflow and security-relevant actions.  
-ii. Logged events shall include actor identity, role, action, timestamp, case reference, and workflow stage.  
-iii. Routing actions, override actions, export actions, and other sensitive events shall be included in the audit scope.  
-
-### b. Traceability Support
-i. System shall support traceability across the full recruitment lifecycle.  
-ii. Screening, evaluation, decision, evidence, routing, and export activities shall remain attributable.  
-iii. Audit records shall support later review for accountability and defensibility.  
-
-### c. Sensitive Access Logging
-i. Sensitive access actions such as viewing protected records, controlled reopen, and export operations shall be recorded where applicable.  
-ii. Audit-log viewing and related sensitive access shall themselves be traceable.  
-
----
-
-# Module 15. Evidence Export and Integrity Verification
-
-## Purpose
-Generates controlled export bundles and supports independent integrity verification.
-
-## Primary Actors
-- Secretariat
-- HRM Chief
-- Appointing Authority
-
-## Technology Basis
-- ReportLab
-- Python zipfile
-- SHA-256 integrity verification output
-- Django export permission logic
-
-## Detailed Functional Requirements
-
-### a. Controlled Export
-i. System shall restrict export actions according to authorized roles.  
-ii. System shall support generation of export bundles containing required recruitment records and outputs.  
-iii. Export actions shall be recorded in the audit log.  
-
-### b. Export Bundle Content
-i. System shall generate an evidence inventory as part of the export bundle.  
-ii. System shall include integrity verification output for exported evidence.  
-iii. Export bundle contents shall remain traceable to the originating recruitment case and workflow context.  
-
-### c. Integrity Verification
-i. Exported evidence shall support SHA-256-based integrity verification.  
-ii. Export bundles shall remain independently verifiable outside the system.  
-iii. System shall support defensible release of recruitment evidence within study scope.  
+### Cardinality
+- Application 1 : M EvidenceVaultItem
+- RecruitmentCase 1 : M EvidenceVaultItem
+- RecruitmentEntry 1 : M EvidenceVaultItem
+- InternalUser 1 : M EvidenceVaultItem
 
 ---
 
-## 5. Project Assumptions and Scope Notes
+## 18. AuditLog
 
-- RecruitGuard-CHD is bounded to the recruitment scope only.
-- Plantilla and COS are supported within one shared system but not through one identical linear workflow.
-- COS remains a lighter flexible branch.
-- No additional End-user actor is introduced in the locked design.
-- COS handling remains under the current internal roles, primarily the Secretariat and HRM Chief.
-- Background investigation is not included as a standalone function in the locked current plan.
-- Full onboarding is out of scope.
-- Security validation uses a controlled staging environment and dummy or synthetic data only.
+### Purpose
+Stores audit-trail records for workflow and security-relevant actions.
+
+### Attributes
+- audit_id (PK)
+- actor_user_id (FK -> InternalUser.user_id, nullable)
+- actor_role
+- action_type
+- entry_id (FK -> RecruitmentEntry.entry_id, nullable)
+- case_id (FK -> RecruitmentCase.case_id, nullable)
+- stage_name
+- timestamp
+- details
+
+### Relationships
+- One AuditLog may refer to one InternalUser
+- One AuditLog may refer to one RecruitmentEntry
+- One AuditLog may refer to one RecruitmentCase
+
+### Cardinality
+- InternalUser 1 : M AuditLog
+- RecruitmentEntry 1 : M AuditLog
+- RecruitmentCase 1 : M AuditLog
+
+---
+
+# Relationship Summary
+
+## Main Flow
+- Applicant 1 : M Application
+- RecruitmentEntry 1 : M Application
+- Application 1 : 1 RecruitmentCase
+
+## Routing / Workflow
+- RecruitmentCase 1 : M CaseAssignment
+- RecruitmentCase 1 : M ScreeningReview
+- RecruitmentCase 1 : M ExamRecord
+- RecruitmentCase 1 : M InterviewRating
+- RecruitmentCase 1 : M EvidenceVaultItem
+- RecruitmentCase 1 : M AuditLog
+
+## Entry-Level Evaluation
+- RecruitmentEntry 1 : M InterviewSession
+- RecruitmentEntry 1 : M DeliberationRecord
+- RecruitmentEntry 1 : M ComparativeAssessmentReport
+- RecruitmentEntry 1 : M FinalDecision
+- RecruitmentEntry 1 : M EvidenceVaultItem
+- RecruitmentEntry 1 : M AuditLog
+
+## Decision Support
+- ComparativeAssessmentReport 1 : M ComparativeAssessmentReportItem
+- RecruitmentCase 1 : M ComparativeAssessmentReportItem
+
+## Completion
+- RecruitmentCase 1 : 0..1 CompletionRecord
+
+# Design Notes
+- Position is separate from RecruitmentEntry
+- Application is separate from RecruitmentCase
+- COS and Plantilla share one system but use different branch logic
+- Level classification / routing basis is a workflow control
+- Evidence integrity is handled through artifact metadata, versioning, and SHA-256
+- Selected sensitive stored data may use AES-256-GCM where applicable
+- Audit logging is mandatory for security-relevant and workflow-relevant actions

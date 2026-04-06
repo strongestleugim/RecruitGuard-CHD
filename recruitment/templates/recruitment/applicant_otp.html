@@ -2,167 +2,132 @@
 {% load recruitment_ui %}
 
 {% block content %}
-<div class="rg-page-header">
-    <div>
-        <p class="rg-eyebrow">OTP Verification</p>
-        <h1 class="rg-page-title">{{ application.position.title }}</h1>
-        <p class="rg-page-copy">Verify the one-time password sent to <strong>{{ application.applicant_email }}</strong> before finalizing the application.</p>
-    </div>
-    <div class="rg-header-stats">
-        <div class="rg-stat-chip">
-            <strong>{{ application.reference_label }}</strong>
-            <span>Application ID</span>
-        </div>
-        <div class="rg-stat-chip">
-            <strong>{{ otp_validity_minutes }}</strong>
-            <span>Minute OTP Validity</span>
-        </div>
-    </div>
-</div>
+<div class="rg-container" style="max-width:900px;">
+    <h1 style="text-align:center;font-size:1.35rem;margin:1rem 0 .5rem;">Apply for Vacancy — Accountless Submission</h1>
 
-<div class="row g-4">
-    <div class="col-lg-7">
-        <div class="card p-4 mb-4">
-            <div class="d-flex flex-wrap gap-2 mb-3">
-                <span class="rg-pill rg-pill--{{ application.branch|branch_theme }}">{{ application.get_branch_display }}</span>
-                <span class="rg-pill rg-pill--{{ application.level|level_theme }}">{{ application.get_level_display }}</span>
-                <span class="rg-pill rg-pill--{% if application.otp_is_currently_valid %}success{% else %}warning{% endif %}">
-                    {% if application.otp_is_currently_valid %}OTP verified{% else %}OTP pending{% endif %}
-                </span>
-            </div>
-            <div class="rg-info-list">
-                <div class="rg-info-row">
-                    <div class="rg-info-row__label">Applicant</div>
-                    <div class="rg-info-row__value">{{ application.applicant_display_name }}</div>
-                </div>
-                <div class="rg-info-row">
-                    <div class="rg-info-row__label">Email</div>
-                    <div class="rg-info-row__value">{{ application.applicant_email }}</div>
-                </div>
-                <div class="rg-info-row">
-                    <div class="rg-info-row__label">Routing Basis</div>
-                    <div class="rg-info-row__value">{{ application.get_level_display }}</div>
-                </div>
-                <div class="rg-info-row">
-                    <div class="rg-info-row__label">Uploaded Evidence</div>
-                    <div class="rg-info-row__value">{{ application.evidence_items.count }} file{{ application.evidence_items.count|pluralize }}</div>
-                </div>
-                <div class="rg-info-row">
-                    <div class="rg-info-row__label">Required Documents</div>
-                    <div class="rg-info-row__value">
-                        <span class="rg-pill rg-pill--{% if document_requirements_complete %}success{% else %}warning{% endif %}">
-                            {% if document_requirements_complete %}Complete{% else %}Incomplete{% endif %}
-                        </span>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="card p-4">
-            <h2 class="h4 mb-2">Finalize Submission</h2>
-            <p class="rg-note mb-4">The OTP expires after {{ otp_validity_minutes }} minute{{ otp_validity_minutes|pluralize }}. Resend a new code if the current one has expired or was not received.</p>
-
-            {% if not application.otp_is_currently_valid %}
-                <form method="post" class="mb-4">
-                    {% csrf_token %}
-                    <input type="hidden" name="action" value="verify">
-                    {% include "recruitment/includes/form_field.html" with field=otp_form.otp %}
-                    <div class="rg-form-actions">
-                        <button type="submit" class="btn btn-rg-primary">Verify OTP</button>
-                    </div>
-                </form>
-            {% else %}
-                <div class="alert alert-success">OTP verification is valid. You can finalize the application now.</div>
-            {% endif %}
-
-            {% if not document_requirements_complete %}
-                <div class="alert alert-warning">The application is still missing one or more required documents and cannot be finalized yet.</div>
-            {% endif %}
-
-            <div class="rg-form-actions">
-                <form method="post">
-                    {% csrf_token %}
-                    <input type="hidden" name="action" value="resend">
-                    <button type="submit" class="btn btn-outline-secondary">Resend OTP</button>
-                </form>
-                <form method="post">
-                    {% csrf_token %}
-                    <input type="hidden" name="action" value="finalize">
-                    <button type="submit" class="btn btn-rg-primary" {% if not application.otp_is_currently_valid or not document_requirements_complete %}disabled{% endif %}>Finalize Submission</button>
-                </form>
-            </div>
-        </div>
+    <div class="rg-step-indicator">
+        <span class="rg-step-indicator__step is-done">
+            <span class="rg-step-indicator__num">✓</span> Email Verification
+        </span>
+        <span class="rg-step-indicator__arrow">→</span>
+        <span class="rg-step-indicator__step is-done">
+            <span class="rg-step-indicator__num">✓</span> Upload Documents
+        </span>
+        <span class="rg-step-indicator__arrow">→</span>
+        <span class="rg-step-indicator__step is-active">
+            <span class="rg-step-indicator__num">3</span> Review &amp; Submit
+        </span>
     </div>
 
-    <div class="col-lg-5">
-        <div class="card p-4 mb-4">
-            <p class="rg-eyebrow">Checklist State</p>
-            <div class="rg-list-stack">
-                <div class="rg-record">
-                    <div class="rg-record__header">
-                        <strong>Privacy Consent</strong>
-                        <span class="rg-pill rg-pill--{% if application.checklist_privacy_consent %}success{% else %}warning{% endif %}">
-                            {% if application.checklist_privacy_consent %}Complete{% else %}Incomplete{% endif %}
-                        </span>
-                    </div>
-                    <p class="mb-0 rg-note">Required before the draft can proceed to OTP issuance.</p>
+    <div class="row g-4">
+        <div class="col-lg-7">
+            <div class="card p-4 mb-4">
+                <div class="d-flex flex-wrap gap-2 mb-3">
+                    <span class="rg-pill rg-pill--{{ application.branch|branch_theme }}">{{ application.get_branch_display }}</span>
+                    <span class="rg-pill rg-pill--{{ application.level|level_theme }}">{{ application.get_level_display }}</span>
+                    <span class="rg-pill rg-pill--{% if application.otp_is_currently_valid %}success{% else %}warning{% endif %}">
+                        {% if application.otp_is_currently_valid %}OTP verified{% else %}OTP pending{% endif %}
+                    </span>
                 </div>
-                <div class="rg-record">
-                    <div class="rg-record__header">
-                        <strong>Document Checklist</strong>
-                        <span class="rg-pill rg-pill--{% if application.checklist_documents_complete %}success{% else %}warning{% endif %}">
-                            {% if application.checklist_documents_complete %}Complete{% else %}Incomplete{% endif %}
-                        </span>
+                <div class="rg-info-list">
+                    <div class="rg-info-row">
+                        <div class="rg-info-row__label">Applicant</div>
+                        <div class="rg-info-row__value">{{ application.applicant_display_name }}</div>
                     </div>
-                    <p class="mb-0 rg-note">Confirms that each required file was uploaded in its designated document slot.</p>
-                </div>
-                <div class="rg-record">
-                    <div class="rg-record__header">
-                        <strong>Information Certification</strong>
-                        <span class="rg-pill rg-pill--{% if application.checklist_information_certified %}success{% else %}warning{% endif %}">
-                            {% if application.checklist_information_certified %}Complete{% else %}Incomplete{% endif %}
-                        </span>
+                    <div class="rg-info-row">
+                        <div class="rg-info-row__label">Email</div>
+                        <div class="rg-info-row__value">{{ application.applicant_email }}</div>
                     </div>
-                    <p class="mb-0 rg-note">Confirms that the submitted details and uploads are true and complete.</p>
+                    <div class="rg-info-row">
+                        <div class="rg-info-row__label">Vacancy</div>
+                        <div class="rg-info-row__value">{{ application.position.title }}</div>
+                    </div>
+                    <div class="rg-info-row">
+                        <div class="rg-info-row__label">Uploaded Files</div>
+                        <div class="rg-info-row__value">{{ application.evidence_items.count }} file{{ application.evidence_items.count|pluralize }}</div>
+                    </div>
                 </div>
+            </div>
+
+            <div class="card p-4">
+                <h2 class="h5 mb-1">Finalize Submission</h2>
+                <p class="rg-note mb-3">The OTP expires after {{ otp_validity_minutes }} minute{{ otp_validity_minutes|pluralize }}.</p>
+
+                {% if not application.otp_is_currently_valid %}
+                    <form method="post" class="mb-3">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="verify">
+                        {% include "recruitment/includes/form_field.html" with field=otp_form.otp %}
+                        <div class="rg-form-actions">
+                            <button type="submit" class="btn btn-rg-primary">Verify OTP</button>
+                        </div>
+                    </form>
+                {% else %}
+                    <div class="alert alert-success">OTP verification is valid. You can finalize the application now.</div>
+                {% endif %}
+
+                <div class="rg-form-actions">
+                    <form method="post">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="resend">
+                        <button type="submit" class="btn btn-outline-secondary">Resend OTP</button>
+                    </form>
+                    <form method="post">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="finalize">
+                        <button type="submit" class="btn btn-rg-primary" {% if not application.otp_is_currently_valid %}disabled{% endif %}>Submit Application</button>
+                    </form>
+                </div>
+                <p class="rg-note mt-2" style="font-size:.75rem;">⚠ After final submission, edits are not allowed unless a resubmission window is enabled by Secretariat.</p>
             </div>
         </div>
 
-        <div class="card p-4 mb-4">
-            <p class="rg-eyebrow">Document Status</p>
-            <div class="rg-list-stack">
-                {% for requirement in document_requirement_statuses %}
+        <div class="col-lg-5">
+            <div class="card p-4 mb-3">
+                <p class="rg-eyebrow">Checklist State</p>
+                <div class="rg-list-stack">
                     <div class="rg-record">
                         <div class="rg-record__header">
-                            <strong>{{ requirement.title }}</strong>
-                            {% if requirement.is_not_applicable %}
-                                <span class="rg-pill rg-pill--neutral">Not applicable</span>
-                            {% elif requirement.is_uploaded %}
-                                <span class="rg-pill rg-pill--success">Uploaded</span>
-                            {% else %}
-                                <span class="rg-pill rg-pill--warning">Missing</span>
-                            {% endif %}
+                            <strong>Privacy Consent</strong>
+                            <span class="rg-pill rg-pill--{% if application.checklist_privacy_consent %}success{% else %}warning{% endif %}">
+                                {% if application.checklist_privacy_consent %}Complete{% else %}Incomplete{% endif %}
+                            </span>
                         </div>
-                        <p class="mb-0 rg-note">{{ requirement.help_text }}</p>
                     </div>
-                {% endfor %}
+                    <div class="rg-record">
+                        <div class="rg-record__header">
+                            <strong>Document Checklist</strong>
+                            <span class="rg-pill rg-pill--{% if application.checklist_documents_complete %}success{% else %}warning{% endif %}">
+                                {% if application.checklist_documents_complete %}Complete{% else %}Incomplete{% endif %}
+                            </span>
+                        </div>
+                    </div>
+                    <div class="rg-record">
+                        <div class="rg-record__header">
+                            <strong>Information Certification</strong>
+                            <span class="rg-pill rg-pill--{% if application.checklist_information_certified %}success{% else %}warning{% endif %}">
+                                {% if application.checklist_information_certified %}Complete{% else %}Incomplete{% endif %}
+                            </span>
+                        </div>
+                    </div>
+                </div>
             </div>
-        </div>
 
-        <div class="card p-4">
-            <p class="rg-eyebrow">What happens next</p>
-            <div class="rg-step-list">
-                <div class="rg-step">
-                    <strong>Submission receipt</strong>
-                    <p>The system generates the final reference only after successful OTP verification and submission.</p>
-                </div>
-                <div class="rg-step">
-                    <strong>Level-aware routing</strong>
-                    <p>Cases are routed to the correct internal handler using the recorded level classification.</p>
-                </div>
-                <div class="rg-step">
-                    <strong>Status lookup</strong>
-                    <p>Use your Application ID and email address to review the latest recorded submission status later.</p>
+            <div class="card p-4">
+                <p class="rg-eyebrow">What happens next</p>
+                <div class="rg-step-list">
+                    <div class="rg-step">
+                        <strong>Submission receipt</strong>
+                        <p>An Application ID is generated after successful OTP verification and submission.</p>
+                    </div>
+                    <div class="rg-step">
+                        <strong>Level-aware routing</strong>
+                        <p>Cases are routed to the correct internal handler using the recorded level classification.</p>
+                    </div>
+                    <div class="rg-step">
+                        <strong>Status lookup</strong>
+                        <p>Use your Application ID and email to check submission status later.</p>
+                    </div>
                 </div>
             </div>
         </div>

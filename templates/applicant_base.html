@@ -30,9 +30,16 @@ background: #f5f6f7;
             <a class="rg-brand rg-public-brand" href="{% url 'applicant-portal' %}">
                 <span class="rg-brand-copy">
                     <span class="rg-brand-kicker">Department of Health - CHD CALABARZON</span>
-                    <span class="rg-brand-title">RecruitGuard-CHD Applicant Portal</span>
+                    <span class="rg-brand-title">RecruitGuard-CHD</span>
                 </span>
             </a>
+        </div>
+        <div class="rg-nav-actions rg-public-nav">
+            <a href="{% url 'applicant-portal' %}" class="rg-nav-link rg-nav-link--{% if request.resolver_match.url_name == 'applicant-portal' %}primary{% else %}secondary{% endif %}">Vacancies</a>
+            <a href="{% url 'applicant-status-lookup' %}" class="rg-nav-link rg-nav-link--{% if request.resolver_match.url_name == 'applicant-status-lookup' %}primary{% else %}secondary{% endif %}">Track Application</a>
+            <a href="{% url 'applicant-portal' %}#help-section" class="rg-nav-link rg-nav-link--secondary">Help</a>
+            <span class="rg-public-nav__divider" aria-hidden="true"></span>
+            <a href="{% url 'login' %}" class="rg-secondary-link rg-public-staff-link">Staff Portal</a>
         </div>
     </div>
 </header>
