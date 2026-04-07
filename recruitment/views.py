@@ -384,7 +384,7 @@ class ApplicationAuditLogView(LoginRequiredMixin, InternalUserRequiredMixin, Det
         return context
 
 
-class AuditLogListView(LoginRequiredMixin, SystemAdministratorRequiredMixin, TemplateView):
+class AuditLogListView(LoginRequiredMixin, InternalUserRequiredMixin, TemplateView):
     template_name = "recruitment/audit_log_list.html"
 
     def get_context_data(self, **kwargs):

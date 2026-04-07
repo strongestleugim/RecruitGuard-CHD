@@ -2,6 +2,7 @@ from django import forms
 from django.conf import settings
 from django.contrib.auth.forms import AuthenticationForm, PasswordChangeForm, UserCreationForm
 from django.forms import BaseInlineFormSet, inlineformset_factory
+from django.forms.models import construct_instance
 from django.utils import timezone
 
 from .models import (
@@ -35,6 +36,18 @@ class BootstrapFormMixin:
                 field.widget.attrs["class"] = f"{css_class} form-select".strip()
             else:
                 field.widget.attrs["class"] = f"{css_class} form-control".strip()
+
+
+class DeferredModelValidationMixin:
+    """
+    Workflow record forms collect only user-editable fields.
+    Actor, review stage, linked case/entry, and generated snapshots are attached
+    later in the service layer before the model is fully validated and saved.
+    """
+
+    def _post_clean(self):
+        opts = self._meta
+        self.instance = construct_instance(self, self.instance, opts.fields, opts.exclude)
 
 
 class MultipleFileInput(forms.ClearableFileInput):
@@ -574,7 +587,7 @@ class CaseClosureForm(BootstrapFormMixin, forms.Form):
         self._apply_bootstrap()
 
 
-class ScreeningReviewForm(BootstrapFormMixin, forms.ModelForm):
+class ScreeningReviewForm(DeferredModelValidationMixin, BootstrapFormMixin, forms.ModelForm):
     class Meta:
         model = ScreeningRecord
         fields = [
@@ -596,7 +609,7 @@ class ScreeningReviewForm(BootstrapFormMixin, forms.ModelForm):
         self._apply_bootstrap()
 
 
-class ExamRecordForm(BootstrapFormMixin, forms.ModelForm):
+class ExamRecordForm(DeferredModelValidationMixin, BootstrapFormMixin, forms.ModelForm):
     class Meta:
         model = ExamRecord
         fields = [
@@ -632,7 +645,7 @@ class ExamRecordForm(BootstrapFormMixin, forms.ModelForm):
         self._apply_bootstrap()
 
 
-class InterviewSessionForm(BootstrapFormMixin, forms.ModelForm):
+class InterviewSessionForm(DeferredModelValidationMixin, BootstrapFormMixin, forms.ModelForm):
     scheduled_for = forms.DateTimeField(
         input_formats=["%Y-%m-%dT%H:%M"],
         widget=forms.DateTimeInput(attrs={"type": "datetime-local"}),
@@ -658,7 +671,7 @@ class InterviewSessionForm(BootstrapFormMixin, forms.ModelForm):
         self._apply_bootstrap()
 
 
-class InterviewRatingForm(BootstrapFormMixin, forms.ModelForm):
+class InterviewRatingForm(DeferredModelValidationMixin, BootstrapFormMixin, forms.ModelForm):
     class Meta:
         model = InterviewRating
         fields = [
@@ -694,7 +707,7 @@ class InterviewFallbackUploadForm(BootstrapFormMixin, forms.Form):
         self._apply_bootstrap()
 
 
-class DeliberationRecordForm(BootstrapFormMixin, forms.ModelForm):
+class DeliberationRecordForm(DeferredModelValidationMixin, BootstrapFormMixin, forms.ModelForm):
     deliberated_at = forms.DateTimeField(
         input_formats=["%Y-%m-%dT%H:%M"],
         widget=forms.DateTimeInput(attrs={"type": "datetime-local"}),
@@ -728,7 +741,7 @@ class DeliberationRecordForm(BootstrapFormMixin, forms.ModelForm):
         self._apply_bootstrap()
 
 
-class ComparativeAssessmentReportForm(BootstrapFormMixin, forms.ModelForm):
+class ComparativeAssessmentReportForm(DeferredModelValidationMixin, BootstrapFormMixin, forms.ModelForm):
     class Meta:
         model = ComparativeAssessmentReport
         fields = [
@@ -745,7 +758,7 @@ class ComparativeAssessmentReportForm(BootstrapFormMixin, forms.ModelForm):
         self._apply_bootstrap()
 
 
-class FinalDecisionForm(BootstrapFormMixin, forms.ModelForm):
+class FinalDecisionForm(DeferredModelValidationMixin, BootstrapFormMixin, forms.ModelForm):
     class Meta:
         model = FinalDecision
         fields = [

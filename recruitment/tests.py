@@ -1483,6 +1483,31 @@ class ExamRecordTests(BaseRecruitmentTestCase):
         )
         self.assertEqual(response.status_code, 403)
 
+    def test_exam_view_invalid_payload_does_not_raise_server_error(self):
+        application = self.make_application(self.level1_position)
+        self.verify_application_for_submission(application)
+        submit_application(application, self.applicant)
+
+        client = Client()
+        client.force_login(self.secretariat)
+        response = client.post(
+            reverse("exam-review", kwargs={"pk": application.pk}),
+            {
+                "exam_type": "314",
+                "exam_status": ExamRecord.ExamStatus.WAIVED,
+                "exam_score": "1231243",
+                "exam_result": "214124",
+                "valid_from": "0214-02-04",
+                "valid_until": "124124-12-04",
+                "exam_notes": "",
+                "operation": "finalize",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(ExamRecord.objects.filter(application=application).exists())
+
     def test_secretariat_cannot_record_level2_exam_without_override(self):
         application = self.make_application(self.level2_position)
         self.verify_application_for_submission(application)
@@ -1729,6 +1754,17 @@ class EvidenceVaultTests(BaseRecruitmentTestCase):
 
 
 class ViewAndExportTests(BaseRecruitmentTestCase):
+    def test_system_admin_dashboard_shows_role_label_and_audit_nav(self):
+        client = Client()
+        client.force_login(self.sysadmin)
+
+        response = client.get(reverse("dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Role: <strong>System Administrator</strong>")
+        self.assertContains(response, f'href="{reverse("audit-log-list")}"')
+        self.assertContains(response, "User Management")
+
     def test_applicant_user_cannot_access_internal_dashboard(self):
         client = Client()
         client.force_login(self.applicant)
@@ -1994,6 +2030,29 @@ class AuditLoggingTraceabilityTests(BaseRecruitmentTestCase):
         log = AuditLog.objects.filter(
             application__isnull=True,
             actor=self.sysadmin,
+            action=AuditLog.Action.AUDIT_LOG_VIEWED,
+        ).latest("created_at")
+        self.assertTrue(log.is_sensitive_access)
+        self.assertEqual(log.metadata["review_scope"], "system_audit")
+
+    def test_secretariat_can_review_system_audit_logs(self):
+        record_system_audit_event(
+            actor=self.sysadmin,
+            action=AuditLog.Action.PASSWORD_CHANGED,
+            description="System administrator changed a password.",
+            metadata={"target_user_id": self.secretariat.id},
+        )
+
+        client = Client()
+        client.force_login(self.secretariat)
+        response = client.get(reverse("audit-log-list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "System Audit Logs")
+        self.assertContains(response, "Password Changed")
+        log = AuditLog.objects.filter(
+            application__isnull=True,
+            actor=self.secretariat,
             action=AuditLog.Action.AUDIT_LOG_VIEWED,
         ).latest("created_at")
         self.assertTrue(log.is_sensitive_access)
