@@ -48,9 +48,7 @@ APPLICANT_DOCUMENT_REQUIREMENTS = (
     ApplicantDocumentRequirement(
         code=PERFORMANCE_RATING,
         title="Performance Rating in the last rating period",
-        help_text="Upload your latest performance rating, or mark this requirement as not applicable.",
-        is_required=False,
-        allow_not_applicable=True,
+        help_text="Upload your latest performance rating.",
     ),
     ApplicantDocumentRequirement(
         code=ELIGIBILITY_OR_LICENSE,

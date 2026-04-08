@@ -168,11 +168,9 @@ class ApplicantPortalIntakeForm(BootstrapFormMixin, forms.Form):
         self.document_upload_field_names = []
         for requirement in self.document_requirements:
             help_text = requirement.help_text
-            if not requirement.is_required:
-                help_text = f"{help_text} Optional when not applicable."
             help_text = f"{help_text} Combine multiple pages or certificates into one file when needed."
             self.fields[requirement.file_field_name] = forms.FileField(
-                required=False,
+                required=requirement.is_required,
                 label=requirement.title,
                 help_text=help_text,
             )
