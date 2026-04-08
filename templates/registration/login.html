@@ -15,7 +15,7 @@
 background: #f5f6f7;
 {% endblock %}
 
-{% block content %}
+{% block layout_wrapper %}
 <div class="rg-auth-shell">
     <div class="rg-auth-grid">
         <div class="card rg-auth-panel">
@@ -24,6 +24,13 @@ background: #f5f6f7;
                 <h1 class="rg-page-title mb-2" style="font-size:1.75rem;">RecruitGuard-CHD</h1>
                 <p class="rg-page-copy">Use your assigned internal account to access protected recruitment functions, workflow routing, evidence handling, and staff-facing records.</p>
             </div>
+            {% if messages %}
+            <div class="rg-message-stack mb-3">
+                {% for message in messages %}
+                    <div class="alert alert-{{ message.tags|default:'info' }}">{{ message }}</div>
+                {% endfor %}
+            </div>
+            {% endif %}
             <form method="post">
                 {% csrf_token %}
                 {% if form.non_field_errors %}
@@ -37,33 +44,7 @@ background: #f5f6f7;
                     <button type="submit" class="btn btn-rg-primary w-100">Sign In</button>
                 </div>
             </form>
-            <div class="rg-form-actions mt-3">
-                <a href="{% url 'applicant-portal' %}" class="btn btn-outline-secondary">Applicant Portal</a>
-                <a href="{% url 'applicant-status-lookup' %}" class="btn btn-outline-secondary">Track Application</a>
-            </div>
         </div>
-
-        <aside class="rg-surface rg-auth-side">
-            <div>
-                <p class="rg-eyebrow">Portal Boundary</p>
-                <h2 class="h2 mb-3">Staff-facing workspace for the shared recruitment engine.</h2>
-                <p class="rg-note">Internal access remains separate from the public applicant portal, while using the same backend, database, and workflow engine.</p>
-            </div>
-            <div class="rg-step-list">
-                <div class="rg-auth-side__panel">
-                    <strong>Protected internal roles only</strong>
-                    <p class="mb-0 rg-note">Secretariat, HRM Chief, HRMPSB Member, Appointing Authority, and System Administrator accounts use this sign-in page.</p>
-                </div>
-                <div class="rg-auth-side__panel">
-                    <strong>Level-aware routing remains enforced</strong>
-                    <p class="mb-0 rg-note">Level 1 routes to Secretariat, while Level 2 routes to HRM Chief unless a controlled override is explicitly granted and logged.</p>
-                </div>
-                <div class="rg-auth-side__panel">
-                    <strong>Applicant functions stay public-facing</strong>
-                    <p class="mb-0 rg-note">Public submission, OTP verification, receipt, and status lookup remain under the separate applicant portal.</p>
-                </div>
-            </div>
-        </aside>
     </div>
 </div>
 {% endblock %}

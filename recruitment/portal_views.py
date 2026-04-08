@@ -2,10 +2,12 @@ from django.conf import settings
 from django.contrib import messages
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect
+from django.utils import timezone
 from django.views.generic import FormView, TemplateView
 
 from .forms import ApplicantOTPForm, ApplicantPortalIntakeForm, ApplicantStatusLookupForm
 from .models import PositionPosting, RecruitmentApplication
+from .requirements import get_applicant_document_requirements
 from .services import (
     create_public_application_draft,
     get_public_recruitment_entries,
@@ -15,14 +17,101 @@ from .services import (
 )
 
 
+_APPLICANT_STATUS_LABELS = {
+    RecruitmentApplication.Status.DRAFT: None,  # drafts not shown
+    RecruitmentApplication.Status.SECRETARIAT_REVIEW: (
+        "Under Review",
+        "review",
+        "Your application is currently being reviewed by our recruitment team. "
+        "You will be contacted if additional information is needed.",
+    ),
+    RecruitmentApplication.Status.HRM_CHIEF_REVIEW: (
+        "Under Review",
+        "review",
+        "Your application is currently being reviewed by our recruitment team.",
+    ),
+    RecruitmentApplication.Status.HRMPSB_REVIEW: (
+        "Under Evaluation",
+        "evaluation",
+        "Your application is currently being evaluated. "
+        "You may be contacted for an examination or interview schedule.",
+    ),
+    RecruitmentApplication.Status.APPOINTING_AUTHORITY_REVIEW: (
+        "Under Processing",
+        "review",
+        "Your application is being processed for the next steps. "
+        "You will be contacted with further instructions.",
+    ),
+    RecruitmentApplication.Status.RETURNED_TO_APPLICANT: (
+        "Action Required",
+        "returned",
+        "Your application has been returned. Please check your email for instructions on what to do next.",
+    ),
+    RecruitmentApplication.Status.APPROVED: (
+        "Approved",
+        "approved",
+        "Congratulations! Your application has been approved. "
+        "You will be contacted with further instructions.",
+    ),
+    RecruitmentApplication.Status.REJECTED: (
+        "Not Selected",
+        "not-selected",
+        "Thank you for your interest. Unfortunately, your application was not selected for this position. "
+        "You are welcome to apply for other open positions.",
+    ),
+    RecruitmentApplication.Status.WITHDRAWN: (
+        "Withdrawn",
+        "not-selected",
+        "This application has been withdrawn.",
+    ),
+}
+
+
+def _posting_is_closing_soon(posting):
+    """Return True if the posting closes within 7 days."""
+    if posting.closing_date:
+        delta = posting.closing_date - timezone.localdate()
+        return 0 <= delta.days <= 7
+    return False
+
+
 class ApplicantPortalView(TemplateView):
     template_name = "recruitment/applicant_portal.html"
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context["plantilla_entries"] = get_public_recruitment_entries(PositionPosting.Branch.PLANTILLA)
-        context["cos_entries"] = get_public_recruitment_entries(PositionPosting.Branch.COS)
+        plantilla = get_public_recruitment_entries(PositionPosting.Branch.PLANTILLA)
+        cos = get_public_recruitment_entries(PositionPosting.Branch.COS)
+        # Annotate each posting with is_closing_soon for template use
+        for entry in list(plantilla) + list(cos):
+            entry.is_closing_soon = _posting_is_closing_soon(entry)
+        context["plantilla_entries"] = plantilla
+        context["cos_entries"] = cos
         return context
+
+
+class ApplicantVacancyDetailView(TemplateView):
+    template_name = "recruitment/applicant_vacancy_detail.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        self.entry = get_object_or_404(
+            PositionPosting.objects.select_related("position_reference"),
+            pk=kwargs["pk"],
+            status=PositionPosting.EntryStatus.ACTIVE,
+        )
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["entry"] = self.entry
+        context["document_requirements"] = get_applicant_document_requirements()
+        context["is_closing_soon"] = _posting_is_closing_soon(self.entry)
+        context["can_apply"] = self.entry.is_open_for_intake
+        return context
+
+
+class ApplicantHelpView(TemplateView):
+    template_name = "recruitment/applicant_help.html"
 
 
 class ApplicantPortalIntakeView(FormView):
@@ -46,6 +135,8 @@ class ApplicantPortalIntakeView(FormView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["entry"] = self.entry
+        max_bytes = getattr(settings, "MAX_EVIDENCE_UPLOAD_BYTES", 5 * 1024 * 1024)
+        context["max_upload_mb"] = max_bytes // (1024 * 1024)
         return context
 
     def form_valid(self, form):
@@ -161,7 +252,18 @@ class ApplicantStatusLookupView(FormView):
         if not application:
             form.add_error(
                 None,
-                "No submitted application matched the provided Application ID and email address.",
+                "We could not find an application with that ID and email combination. "
+                "Please check your Application ID and email address and try again.",
             )
             return self.form_invalid(form)
-        return self.render_to_response(self.get_context_data(form=form, application=application))
+        status_info = _APPLICANT_STATUS_LABELS.get(application.status)
+        status_label = status_info[0] if status_info else "Received"
+        status_variant = status_info[1] if status_info else "review"
+        status_description = status_info[2] if status_info else "Your application has been received."
+        return self.render_to_response(self.get_context_data(
+            form=form,
+            application=application,
+            status_label=status_label,
+            status_variant=status_variant,
+            status_description=status_description,
+        ))

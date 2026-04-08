@@ -1,177 +1,162 @@
 {% extends "applicant_base.html" %}
 
-{% block main_class %}py-4{% endblock %}
+{% block main_class %}{% endblock %}
 
 {% block content %}
-<div class="rg-container rg-public-page">
-    <section class="rg-public-intro" aria-labelledby="portal-heading">
-        <div class="rg-public-intro__body">
-            <h1 class="rg-public-intro__title" id="portal-heading">Official Recruitment Application Portal</h1>
-            <p class="rg-public-intro__copy">Browse current DOH-CHD CALABARZON recruitment openings. Select a vacancy to view details, then apply through the guided submission process.</p>
+{# ── Landing hero ─────────────────────────────────────────────── #}
+<div style="background:#fff; border-bottom:1px solid #d7dde3;">
+    <div class="rg-pub-wrap" style="padding-block:2.5rem 2rem; text-align:center;">
+        <h1 class="rg-pub-hero__title">Apply for a Position at<br>DOH&ndash;CHD CALABARZON</h1>
+        <p class="rg-pub-hero__copy">
+            Browse current job openings, submit your application online,
+            and track your application status &mdash; all in one place.
+        </p>
+        <div class="rg-pub-action-grid">
+            <a href="#job-openings" class="rg-pub-action-card" id="browse-card">
+                <div class="rg-pub-action-card__icon">&#128203;</div>
+                <p class="rg-pub-action-card__title">View Job Openings</p>
+                <p class="rg-pub-action-card__copy">See all available positions and apply online.</p>
+                <span class="rg-pub-action-card__cta">Browse Openings &rarr;</span>
+            </a>
+            <a href="{% url 'applicant-status-lookup' %}" class="rg-pub-action-card">
+                <div class="rg-pub-action-card__icon">&#128269;</div>
+                <p class="rg-pub-action-card__title">Track My Application</p>
+                <p class="rg-pub-action-card__copy">Already applied? Check your application status anytime.</p>
+                <span class="rg-pub-action-card__cta">Check Status &rarr;</span>
+            </a>
         </div>
-    </section>
-
-    <div class="rg-vacancy-split" id="application-paths">
-        <div class="rg-vacancy-list">
-            <div class="rg-vacancy-list__header">
-                <h2 class="rg-vacancy-list__title">Vacancies List</h2>
-                <div class="rg-vacancy-filters">
-                    <input type="text" class="form-control" placeholder="Search by position, keywords..." id="vacancy-search">
-                    <select class="form-select" id="vacancy-level-filter">
-                        <option value="">Position Level: All</option>
-                        <option value="1">First</option>
-                        <option value="2">Second</option>
-                    </select>
-                    <select class="form-select" id="vacancy-deadline-filter">
-                        <option value="">Deadline: All</option>
-                        <option value="open">Open</option>
-                        <option value="closing">Closing Soon</option>
-                    </select>
-                </div>
-            </div>
-            {% for entry in plantilla_entries %}
-                <div class="rg-vacancy-card js-vacancy-card {% if forloop.first %}is-selected{% endif %}"
-                     data-entry-id="{{ entry.pk }}"
-                     data-title="{{ entry.title }}"
-                     data-code="{{ entry.job_code|default:'Not specified' }}"
-                     data-unit="{{ entry.unit|default:'CHD CALABARZON' }}"
-                     data-level="{{ entry.get_level_display }}"
-                     data-branch="{{ entry.get_branch_display }}"
-                     data-intake="{{ entry.get_intake_mode_display }}"
-                     data-closing="{% if entry.closing_date %}{{ entry.closing_date|date:'F d, Y' }}{% else %}Open while active{% endif %}"
-                     data-requirements="{{ entry.requirements|default:'Requirement details will be validated during the screening stage.' }}"
-                     data-qualification="{{ entry.qualification_reference|default:'No additional qualification reference posted.' }}"
-                     data-description="{{ entry.description|default:'Position details will be confirmed during screening and validation.' }}">
-                    <p class="rg-vacancy-card__title">{{ entry.title }}</p>
-                    <p class="rg-vacancy-card__meta">{{ entry.get_branch_display }} &middot; {{ entry.unit|default:"CHD CALABARZON" }}</p>
-                    <p class="rg-vacancy-card__meta">Posting: {% if entry.closing_date %}Until {{ entry.closing_date|date:"M d, Y" }}{% else %}Open{% endif %}</p>
-                    <span class="rg-vacancy-card__badge">Published</span>
-                </div>
-            {% endfor %}
-            {% for entry in cos_entries %}
-                <div class="rg-vacancy-card js-vacancy-card"
-                     data-entry-id="{{ entry.pk }}"
-                     data-title="{{ entry.title }}"
-                     data-code="{{ entry.job_code|default:'Not specified' }}"
-                     data-unit="{{ entry.unit|default:'CHD CALABARZON' }}"
-                     data-level="{{ entry.get_level_display }}"
-                     data-branch="{{ entry.get_branch_display }}"
-                     data-intake="{{ entry.get_intake_mode_display }}"
-                     data-closing="{% if entry.closing_date %}{{ entry.closing_date|date:'F d, Y' }}{% else %}Open while active{% endif %}"
-                     data-requirements="{{ entry.requirements|default:'Requirement details will be validated during the screening stage.' }}"
-                     data-qualification="{{ entry.qualification_reference|default:'No additional qualification reference posted.' }}"
-                     data-description="{{ entry.description|default:'COS intake details will be confirmed during screening.' }}">
-                    <p class="rg-vacancy-card__title">{{ entry.title }}</p>
-                    <p class="rg-vacancy-card__meta">{{ entry.get_branch_display }} &middot; {{ entry.unit|default:"CHD CALABARZON" }}</p>
-                    <p class="rg-vacancy-card__meta">Posting: {% if entry.closing_date %}Until {{ entry.closing_date|date:"M d, Y" }}{% else %}Open{% endif %}</p>
-                    <span class="rg-vacancy-card__badge">Published</span>
-                </div>
-            {% endfor %}
-            {% if not plantilla_entries and not cos_entries %}
-                <div style="padding:2rem;text-align:center;color:#5f6c78;">No active vacancies at this time.</div>
-            {% endif %}
-        </div>
-
-        <div class="rg-vacancy-detail" id="vacancy-detail-panel">
-            {% with entries=plantilla_entries|default:cos_entries %}
-            {% if entries %}
-                {% with entry=entries.0 %}
-                <p class="rg-vacancy-detail__heading">Vacancy Detail</p>
-                <h2 class="rg-vacancy-detail__title" id="detail-title">{{ entry.title }}</h2>
-                <h3>Position Details</h3>
-                <ul id="detail-info">
-                    <li><strong>Item Number:</strong> <span id="detail-code">{{ entry.job_code|default:"Not specified" }}</span></li>
-                    <li><strong>Division:</strong> <span id="detail-unit">{{ entry.unit|default:"CHD CALABARZON" }}</span></li>
-                    <li><strong>Branch:</strong> <span id="detail-branch">{{ entry.get_branch_display }}</span></li>
-                </ul>
-
-                <h3>Qualification Standards (QS)</h3>
-                <p id="detail-qualification" style="font-size:.8125rem;color:#374151;">{{ entry.qualification_reference|default:"No additional qualification reference posted." }}</p>
-
-                <h3>Requirements</h3>
-                <p id="detail-requirements" style="font-size:.8125rem;color:#374151;">{{ entry.requirements|default:"Requirement details will be validated during the screening stage." }}</p>
-
-                <h3>Application Deadline</h3>
-                <p id="detail-closing" style="font-size:.8125rem;color:#374151;">{% if entry.closing_date %}{{ entry.closing_date|date:"F d, Y" }}{% else %}Open while active{% endif %}</p>
-
-                <div class="rg-vacancy-detail__privacy">
-                    <strong>Data Privacy Notice (summary)</strong><br>
-                    Your personal data will be used solely for recruitment purposes in accordance with the Data Privacy Act of 2012.
-                </div>
-
-                <div class="rg-vacancy-detail__actions">
-                    <a href="{% url 'applicant-intake' entry.pk %}" class="btn btn-rg-primary" id="detail-apply-btn">Apply Now</a>
-                </div>
-                <p class="rg-vacancy-detail__note">Note: Applicants submit without creating an account; email OTP required for submission.</p>
-                {% endwith %}
-            {% else %}
-                <p class="rg-vacancy-detail__heading">Vacancy Detail</p>
-                <p style="color:#5f6c78;font-size:.875rem;">Select a vacancy from the list to view details.</p>
-            {% endif %}
-            {% endwith %}
-        </div>
+        <p class="rg-pub-hero__trust">
+            Official online recruitment portal of the Department of Health &ndash; Center for Health Development CALABARZON.
+        </p>
     </div>
-
-    <section class="rg-public-section" id="help-section" aria-labelledby="help-heading">
-        <div class="rg-public-section__header">
-            <h2 class="rg-public-section__title" id="help-heading">Help &amp; Guidance</h2>
-        </div>
-        <div class="rg-public-guidance">
-            <article class="rg-public-guidance__item">
-                <h3 class="rg-public-guidance__title">How to Apply</h3>
-                <p class="rg-public-guidance__copy">Select a vacancy, review the requirements, click Apply Now, fill in your details, upload documents, and verify via OTP to submit.</p>
-            </article>
-            <article class="rg-public-guidance__item">
-                <h3 class="rg-public-guidance__title">Before Submission</h3>
-                <p class="rg-public-guidance__copy">Prepare all required documents. Final submission is accepted only after successful OTP verification.</p>
-            </article>
-            <article class="rg-public-guidance__item">
-                <h3 class="rg-public-guidance__title">After Submission</h3>
-                <p class="rg-public-guidance__copy">Keep the generated Application ID. Use the Track Application page to view the latest recorded status.</p>
-            </article>
-        </div>
-    </section>
-
-    <footer class="rg-public-footer">
-        <p class="rg-public-footer__title">Department of Health - Center for Health Development CALABARZON (Region IV-A)</p>
-        <p class="rg-public-footer__copy">Official applicant intake interface for RecruitGuard-CHD</p>
-    </footer>
 </div>
 
+{# ── Job Openings List ─────────────────────────────────────────── #}
+<div class="rg-pub-wrap" id="job-openings">
+
+    <div class="rg-pub-page-header" style="margin-top:2rem;">
+        <h2 class="rg-pub-page-title">Job Openings</h2>
+        <p class="rg-pub-page-copy">These are the positions currently accepting applications.</p>
+    </div>
+
+    {# Filter bar #}
+    {% if plantilla_entries or cos_entries %}
+    <div class="rg-pub-filters">
+        <select class="form-select" id="filter-type" aria-label="Filter by position type" style="max-width:220px;">
+            <option value="">All Position Types</option>
+            <option value="plantilla">Permanent (Plantilla)</option>
+            <option value="cos">Contract of Service</option>
+        </select>
+    </div>
+    {% endif %}
+
+    {# Plantilla entries #}
+    {% for entry in plantilla_entries %}
+    <a href="{% url 'applicant-vacancy-detail' entry.pk %}"
+       class="rg-pub-job-card rg-pub-job-card--plantilla js-job-card"
+       data-type="plantilla"
+       aria-label="View details for {{ entry.title }}">
+        <div class="rg-pub-job-card__inner">
+            <div class="rg-pub-job-card__body">
+                <h3 class="rg-pub-job-card__title">{{ entry.title }}</h3>
+                <p class="rg-pub-job-card__meta">
+                    Permanent &middot; {{ entry.unit|default:"CHD CALABARZON" }}
+                </p>
+                <p class="rg-pub-job-card__deadline {% if entry.is_closing_soon %}rg-pub-job-card__deadline--urgent{% endif %}">
+                    {% if entry.closing_date %}
+                        {% if entry.is_closing_soon %}Closing soon &mdash; {% endif %}Closing Date: {{ entry.closing_date|date:"F d, Y" }}
+                    {% else %}
+                        Open while active
+                    {% endif %}
+                </p>
+            </div>
+            <span class="rg-pub-job-card__action" aria-hidden="true">View Details &rarr;</span>
+        </div>
+    </a>
+    {% endfor %}
+
+    {# COS entries #}
+    {% for entry in cos_entries %}
+    <a href="{% url 'applicant-vacancy-detail' entry.pk %}"
+       class="rg-pub-job-card rg-pub-job-card--cos js-job-card"
+       data-type="cos"
+       aria-label="View details for {{ entry.title }}">
+        <div class="rg-pub-job-card__inner">
+            <div class="rg-pub-job-card__body">
+                <h3 class="rg-pub-job-card__title">{{ entry.title }}</h3>
+                <p class="rg-pub-job-card__meta">
+                    Contract of Service &middot; {{ entry.unit|default:"CHD CALABARZON" }}
+                </p>
+                <p class="rg-pub-job-card__deadline {% if entry.is_closing_soon %}rg-pub-job-card__deadline--urgent{% endif %}">
+                    {% if entry.closing_date %}
+                        {% if entry.is_closing_soon %}Closing soon &mdash; {% endif %}Closing Date: {{ entry.closing_date|date:"F d, Y" }}
+                    {% else %}
+                        Open while active
+                    {% endif %}
+                </p>
+            </div>
+            <span class="rg-pub-job-card__action" aria-hidden="true">View Details &rarr;</span>
+        </div>
+    </a>
+    {% endfor %}
+
+    {# Empty state #}
+    {% if not plantilla_entries and not cos_entries %}
+    <div class="rg-pub-info-box rg-pub-info-box--info" style="text-align:center; padding:2rem;">
+        <p style="font-weight:600; margin-bottom:0.35rem;">No open positions at this time.</p>
+        <p style="font-size:0.875rem; margin:0;">Please check back later. For questions, email <a href="mailto:recruitment@chd4a.doh.gov.ph">recruitment@chd4a.doh.gov.ph</a>.</p>
+    </div>
+    {% endif %}
+
+    <p class="rg-pub-result-count js-result-count" style="margin-top:1rem;" aria-live="polite">
+        Showing {{ plantilla_entries|length|add:cos_entries|length }} position{{ plantilla_entries|length|add:cos_entries|length|pluralize }}
+    </p>
+
+</div>
+
+{# ── Page footer ───────────────────────────────────────────────── #}
+<footer style="background:#fff; border-top:1px solid #d7dde3; margin-top:3rem; padding:1.5rem 0;">
+    <div class="rg-pub-wrap" style="padding-block:0; text-align:center;">
+        <p style="margin:0 0 0.2rem; font-size:0.8125rem; font-weight:600; color:#374151;">
+            Department of Health &ndash; Center for Health Development CALABARZON (Region IV-A)
+        </p>
+        <p style="margin:0; font-size:0.8125rem; color:#6b7280;">
+            RecruitGuard-CHD Recruitment Portal &middot;
+            <a href="mailto:recruitment@chd4a.doh.gov.ph" style="color:#005a87;">recruitment@chd4a.doh.gov.ph</a>
+        </p>
+    </div>
+</footer>
+
 <script>
-(function(){
-    var cards = document.querySelectorAll('.js-vacancy-card');
-    var detailTitle = document.getElementById('detail-title');
-    var detailCode = document.getElementById('detail-code');
-    var detailUnit = document.getElementById('detail-unit');
-    var detailBranch = document.getElementById('detail-branch');
-    var detailQual = document.getElementById('detail-qualification');
-    var detailReqs = document.getElementById('detail-requirements');
-    var detailClosing = document.getElementById('detail-closing');
-    var detailBtn = document.getElementById('detail-apply-btn');
-    if(!detailTitle) return;
-    cards.forEach(function(card){
-        card.addEventListener('click', function(){
-            cards.forEach(function(c){c.classList.remove('is-selected');});
-            card.classList.add('is-selected');
-            detailTitle.textContent = card.dataset.title;
-            detailCode.textContent = card.dataset.code;
-            detailUnit.textContent = card.dataset.unit;
-            detailBranch.textContent = card.dataset.branch;
-            detailQual.textContent = card.dataset.qualification;
-            detailReqs.textContent = card.dataset.requirements;
-            detailClosing.textContent = card.dataset.closing;
-            if(detailBtn) detailBtn.href = '/apply/entries/' + card.dataset.entryId + '/';
+(function () {
+    var filterType = document.getElementById('filter-type');
+    var cards = document.querySelectorAll('.js-job-card');
+    var countEl = document.querySelector('.js-result-count');
+
+    function applyFilters() {
+        var type = filterType ? filterType.value : '';
+        var visible = 0;
+        cards.forEach(function (card) {
+            var show = (!type || card.dataset.type === type);
+            card.style.display = show ? '' : 'none';
+            if (show) visible++;
         });
-    });
-    var searchInput = document.getElementById('vacancy-search');
-    if(searchInput){
-        searchInput.addEventListener('input', function(){
-            var q = this.value.toLowerCase();
-            cards.forEach(function(c){
-                var t = (c.dataset.title||'').toLowerCase();
-                c.style.display = t.indexOf(q) !== -1 ? '' : 'none';
-            });
+        if (countEl) {
+            countEl.textContent = 'Showing ' + visible + ' position' + (visible !== 1 ? 's' : '');
+        }
+    }
+
+    if (filterType) filterType.addEventListener('change', applyFilters);
+
+    // Smooth scroll for "Browse Openings" card
+    var browseCard = document.getElementById('browse-card');
+    if (browseCard) {
+        browseCard.addEventListener('click', function (e) {
+            var target = document.getElementById('job-openings');
+            if (target) {
+                e.preventDefault();
+                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
         });
     }
 })();

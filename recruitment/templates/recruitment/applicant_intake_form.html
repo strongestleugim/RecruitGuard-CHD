@@ -1,132 +1,284 @@
 {% extends "applicant_base.html" %}
 {% load recruitment_ui %}
 
-{% block content %}
-<div class="rg-container" style="max-width:900px;">
-    <h1 style="text-align:center;font-size:1.35rem;margin:1rem 0 .5rem;">Apply for Vacancy — Accountless Submission</h1>
+{% block title %}Apply — {{ entry.title }} | RecruitGuard-CHD{% endblock %}
 
-    <div class="rg-step-indicator">
-        <span class="rg-step-indicator__step is-active">
-            <span class="rg-step-indicator__num">1</span> Email Verification
-        </span>
-        <span class="rg-step-indicator__arrow">→</span>
-        <span class="rg-step-indicator__step">
-            <span class="rg-step-indicator__num">2</span> Upload Documents
-        </span>
-        <span class="rg-step-indicator__arrow">→</span>
-        <span class="rg-step-indicator__step">
-            <span class="rg-step-indicator__num">3</span> Review &amp; Submit
-        </span>
+{% block site_header %}
+{# Simplified navbar during application flow #}
+<header class="rg-topbar rg-public-topbar">
+    <div class="rg-container rg-topbar__inner rg-public-topbar__inner">
+        <div class="rg-topbar__group">
+            <a class="rg-brand rg-public-brand" href="{% url 'applicant-portal' %}">
+                <span class="rg-brand-copy">
+                    <span class="rg-brand-kicker">Department of Health &ndash; CHD CALABARZON</span>
+                    <span class="rg-brand-title">RecruitGuard-CHD</span>
+                </span>
+            </a>
+        </div>
+        <div style="font-size:0.875rem; color:#5f6c78;">
+            Applying for: <strong style="color:#111827;">{{ entry.title }}</strong>
+        </div>
     </div>
+</header>
+{% endblock %}
 
-    <div class="row g-4">
-        <div class="col-lg-8">
-            <form method="post" enctype="multipart/form-data">
-                {% csrf_token %}
-                {% if form.non_field_errors %}
-                    <div class="alert alert-danger">{{ form.non_field_errors }}</div>
-                {% endif %}
+{% block main_class %}{% endblock %}
 
-                <div class="card p-4 mb-4">
-                    <h2 class="h5 mb-1">Email Verification</h2>
-                    <p class="rg-note mb-3">Enter your email address. An OTP will be sent after submission to verify your identity.</p>
-                    <div class="row g-3">
-                        <div class="col-md-6">{% include "recruitment/includes/form_field.html" with field=form.email %}</div>
-                        <div class="col-md-6">{% include "recruitment/includes/form_field.html" with field=form.phone %}</div>
-                        <div class="col-md-6">{% include "recruitment/includes/form_field.html" with field=form.first_name %}</div>
-                        <div class="col-md-6">{% include "recruitment/includes/form_field.html" with field=form.last_name %}</div>
-                    </div>
-                    <p class="rg-note mt-2" style="font-size:.75rem;"><em>ℹ Note: OTP is required to verify submission.</em></p>
-                </div>
+{% block content %}
 
-                <div class="card p-4 mb-4">
-                    <h2 class="h5 mb-1">Upload Documents</h2>
-                    <p class="rg-note mb-3">Upload each requirement-coded document for this recruitment entry.</p>
-                    <div class="rg-upload-grid mb-3">
-                        {% for field in form.document_upload_fields %}
-                            <label class="rg-upload-card" for="{{ field.id_for_label }}">
-                                <div class="rg-upload-card__icon">📄</div>
-                                <p class="rg-upload-card__label">{{ field.label }}</p>
-                                <p class="rg-upload-card__hint">Upload PDF/JPG</p>
-                                {{ field }}
-                            </label>
-                        {% endfor %}
-                    </div>
-                </div>
-
-                <div class="card p-4 mb-4">
-                    <h2 class="h5 mb-1">Application Narrative</h2>
-                    <p class="rg-note mb-3">Summarize your qualifications clearly.</p>
-                    <div class="row g-3">
-                        <div class="col-12">{% include "recruitment/includes/form_field.html" with field=form.qualification_summary %}</div>
-                        <div class="col-12">{% include "recruitment/includes/form_field.html" with field=form.cover_letter %}</div>
-                    </div>
-                </div>
-
-                <div class="card p-4 mb-4">
-                    <h2 class="h5 mb-1">Review Summary</h2>
-                    <p class="rg-note mb-3">Confirm your details before sending the OTP.</p>
-                    <div class="rg-info-list">
-                        <div class="rg-info-row">
-                            <div class="rg-info-row__label">Vacancy Title</div>
-                            <div class="rg-info-row__value">{{ entry.title }}</div>
-                        </div>
-                        <div class="rg-info-row">
-                            <div class="rg-info-row__label">Branch</div>
-                            <div class="rg-info-row__value">{{ entry.get_branch_display }}</div>
-                        </div>
-                        <div class="rg-info-row">
-                            <div class="rg-info-row__label">Routing Basis</div>
-                            <div class="rg-info-row__value">{{ entry.get_level_display }}</div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="card p-4">
-                    <h2 class="h5 mb-1">Submission Checklist</h2>
-                    <p class="rg-note mb-3">All checklist items must be confirmed before submission.</p>
-                    <div class="rg-form-grid">
-                        {% include "recruitment/includes/form_field.html" with field=form.checklist_privacy_consent %}
-                        {% include "recruitment/includes/form_field.html" with field=form.checklist_documents_complete %}
-                        {% include "recruitment/includes/form_field.html" with field=form.checklist_information_certified %}
-                    </div>
-                    <div class="rg-form-actions">
-                        <button type="submit" class="btn btn-rg-primary">Submit Application</button>
-                        <a href="{% url 'applicant-portal' %}" class="btn btn-outline-secondary">Back to Vacancies</a>
-                    </div>
-                    <p class="rg-note mt-2" style="font-size:.75rem;">⚠ After final submission, edits are not allowed unless a resubmission window is enabled by Secretariat.</p>
-                </div>
-            </form>
-        </div>
-        <div class="col-lg-4">
-            <div class="card p-3 mb-3">
-                <div class="d-flex flex-wrap gap-2 mb-2">
-                    <span class="rg-pill rg-pill--{{ entry.branch|branch_theme }}">{{ entry.get_branch_display }}</span>
-                    <span class="rg-pill rg-pill--{{ entry.level|level_theme }}">{{ entry.get_level_display }}</span>
-                </div>
-                <h3 class="h6 mb-1">{{ entry.title }}</h3>
-                <p class="rg-note" style="font-size:.75rem;">{{ entry.job_code }}{% if entry.closing_date %} | Closes {{ entry.closing_date|date:"M d, Y" }}{% endif %}</p>
-            </div>
-
-            <div class="rg-checklist-panel">
-                <p class="rg-checklist-panel__title">Completeness Checklist</p>
-                {% for field in form.document_upload_fields %}
-                    <div class="rg-checklist-item">
-                        <span class="rg-checklist-item__dot"></span>
-                        {{ field.label }}
-                    </div>
-                {% endfor %}
-            </div>
-
-            <div class="card p-3 mt-3">
-                <p class="rg-eyebrow">Before you continue</p>
-                <ul class="rg-bullet-list rg-note" style="font-size:.75rem;">
-                    <li>Use an active email address because the OTP is sent there.</li>
-                    <li>Upload the requirement-coded documents before requesting the OTP.</li>
-                    <li>Review the checklist statements carefully.</li>
-                </ul>
-            </div>
-        </div>
+{# Stepper #}
+<div class="rg-pub-stepper" role="navigation" aria-label="Application steps">
+    <div class="rg-pub-stepper__step rg-pub-stepper__step--active">
+        <div class="rg-pub-stepper__circle" aria-current="step">1</div>
+        <span class="rg-pub-stepper__label">Your Information</span>
+    </div>
+    <div class="rg-pub-stepper__connector"></div>
+    <div class="rg-pub-stepper__step">
+        <div class="rg-pub-stepper__circle">2</div>
+        <span class="rg-pub-stepper__label">Documents</span>
+    </div>
+    <div class="rg-pub-stepper__connector"></div>
+    <div class="rg-pub-stepper__step">
+        <div class="rg-pub-stepper__circle">3</div>
+        <span class="rg-pub-stepper__label">Verify Email</span>
+    </div>
+    <div class="rg-pub-stepper__connector"></div>
+    <div class="rg-pub-stepper__step">
+        <div class="rg-pub-stepper__circle">4</div>
+        <span class="rg-pub-stepper__label">Review &amp; Submit</span>
     </div>
 </div>
+<p class="rg-pub-stepper-label">Step 1 of 4 &mdash; Fill in your information, then upload documents and verify your email.</p>
+
+<div class="rg-pub-wrap rg-pub-wrap--form">
+
+    {# Page heading #}
+    <div class="rg-pub-page-header" style="margin-top:1.75rem;">
+        <h1 class="rg-pub-page-title" style="font-size:1.35rem;">Submit Your Application</h1>
+        <p class="rg-pub-page-copy">
+            Complete all required fields below. Fields marked with
+            <strong style="color:#b91c1c;">*</strong> are required.
+        </p>
+    </div>
+
+    {% if form.non_field_errors %}
+    <div class="alert alert-danger mb-4" role="alert">
+        {% for error in form.non_field_errors %}
+            <p style="margin:0 0 0.25rem;">{{ error }}</p>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <form method="post" enctype="multipart/form-data" novalidate>
+        {% csrf_token %}
+
+        {# ── Section 1: Your Details ─────────────────────────────── #}
+        <div class="card p-4 mb-4">
+            <div class="rg-pub-form-group">
+                <h2 class="rg-pub-form-group__heading" style="border-top:none; padding-top:0;">Your Details</h2>
+
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <div class="rg-pub-field">
+                            <label for="{{ form.first_name.id_for_label }}">
+                                First Name <span class="text-danger">*</span>
+                            </label>
+                            {{ form.first_name }}
+                            {% if form.first_name.errors %}
+                                <div class="invalid-feedback d-block">{{ form.first_name.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="rg-pub-field">
+                            <label for="{{ form.last_name.id_for_label }}">
+                                Last Name <span class="text-danger">*</span>
+                            </label>
+                            {{ form.last_name }}
+                            {% if form.last_name.errors %}
+                                <div class="invalid-feedback d-block">{{ form.last_name.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="rg-pub-field">
+                            <label for="{{ form.email.id_for_label }}">
+                                Email Address <span class="text-danger">*</span>
+                            </label>
+                            {{ form.email }}
+                            <div class="form-text">
+                                A verification code will be sent to this email. Make sure it is correct.
+                            </div>
+                            {% if form.email.errors %}
+                                <div class="invalid-feedback d-block">{{ form.email.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="rg-pub-field">
+                            <label for="{{ form.phone.id_for_label }}">
+                                Mobile Number <span class="text-danger">*</span>
+                            </label>
+                            {{ form.phone }}
+                            <div class="form-text">e.g. 09XX XXX XXXX</div>
+                            {% if form.phone.errors %}
+                                <div class="invalid-feedback d-block">{{ form.phone.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {# ── Section 2: Qualification & Cover Letter ───────────── #}
+            <div class="rg-pub-form-group">
+                <h2 class="rg-pub-form-group__heading">Qualifications &amp; Cover Letter</h2>
+
+                <div class="rg-pub-field">
+                    <label for="{{ form.qualification_summary.id_for_label }}">
+                        Summary of Qualifications <span class="text-danger">*</span>
+                    </label>
+                    {{ form.qualification_summary }}
+                    <div class="form-text">
+                        Briefly describe your relevant education, experience, and skills for this position.
+                    </div>
+                    {% if form.qualification_summary.errors %}
+                        <div class="invalid-feedback d-block">{{ form.qualification_summary.errors.0 }}</div>
+                    {% endif %}
+                </div>
+
+                <div class="rg-pub-field" style="margin-top:1rem;">
+                    <label for="{{ form.cover_letter.id_for_label }}">
+                        Cover Letter
+                        <span style="font-size:0.8rem; font-weight:400; color:#9aa4af;">(Optional)</span>
+                    </label>
+                    {{ form.cover_letter }}
+                    <div class="form-text">
+                        Address your cover letter to: <strong>VOLTAIRE S. GUADALUPE, MD, MPH, MAHPS, Director IV</strong>.
+                    </div>
+                    {% if form.cover_letter.errors %}
+                        <div class="invalid-feedback d-block">{{ form.cover_letter.errors.0 }}</div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        {# ── Section 3: Document Uploads ──────────────────────────── #}
+        <div class="card p-4 mb-4">
+            <div class="rg-pub-form-group" style="margin-bottom:0;">
+                <h2 class="rg-pub-form-group__heading" style="border-top:none; padding-top:0;">Upload Your Documents</h2>
+                <p style="font-size:0.875rem; color:#5f6c78; margin-bottom:1.25rem;">
+                    Accepted file types: <strong>PDF, JPG, PNG</strong>.
+                    Maximum size per file: <strong>{{ max_upload_mb }} MB</strong>.
+                    You may take a clear photo of paper documents using your phone.
+                </p>
+
+                {% for field in form.document_upload_fields %}
+                <div class="rg-pub-upload-slot {% if field.errors %}rg-pub-upload-slot--error{% endif %}" id="slot-{{ field.html_name }}">
+                    <p class="rg-pub-upload-slot__name">
+                        {{ field.label }}
+                        {% if field.field.required %}
+                            <span class="text-danger">*</span>
+                        {% else %}
+                            <span class="rg-pub-optional-tag">Optional</span>
+                        {% endif %}
+                    </p>
+                    {% if field.help_text %}
+                    <p class="rg-pub-upload-slot__hint">{{ field.help_text }}</p>
+                    {% endif %}
+                    {{ field }}
+                    {% if field.errors %}
+                        <div class="invalid-feedback d-block" style="margin-top:0.4rem; font-size:0.8125rem;">
+                            {{ field.errors.0 }}
+                        </div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+
+                <div class="rg-pub-tips-box">
+                    <p class="rg-pub-tips-box__title">&#128161; Tips for uploading documents:</p>
+                    <ul>
+                        <li>Take a clear, well-lit photo if you don&rsquo;t have a scanner &mdash; the text must be readable.</li>
+                        <li>If a document has multiple pages, combine them into one file before uploading.</li>
+                        <li>Make sure the file is not blurry or cropped.</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        {# ── Section 4: Submission Checklist ──────────────────────── #}
+        <div class="card p-4 mb-4">
+            <div class="rg-pub-form-group" style="margin-bottom:0;">
+                <h2 class="rg-pub-form-group__heading" style="border-top:none; padding-top:0;">Confirmation</h2>
+                <p style="font-size:0.875rem; color:#5f6c78; margin-bottom:1rem;">
+                    Please confirm the following before submitting your application.
+                </p>
+
+                <div class="rg-pub-confirm-box">
+                    {# Privacy consent #}
+                    <div class="form-check">
+                        {{ form.checklist_privacy_consent }}
+                        <label class="form-check-label" for="{{ form.checklist_privacy_consent.id_for_label }}">
+                            {{ form.checklist_privacy_consent.label }}
+                        </label>
+                    </div>
+                    {% if form.checklist_privacy_consent.errors %}
+                        <div class="invalid-feedback d-block ps-4" style="font-size:0.8125rem;">
+                            {{ form.checklist_privacy_consent.errors.0 }}
+                        </div>
+                    {% endif %}
+
+                    {# Documents complete #}
+                    <div class="form-check">
+                        {{ form.checklist_documents_complete }}
+                        <label class="form-check-label" for="{{ form.checklist_documents_complete.id_for_label }}">
+                            {{ form.checklist_documents_complete.label }}
+                        </label>
+                    </div>
+                    {% if form.checklist_documents_complete.errors %}
+                        <div class="invalid-feedback d-block ps-4" style="font-size:0.8125rem;">
+                            {{ form.checklist_documents_complete.errors.0 }}
+                        </div>
+                    {% endif %}
+
+                    {# Information certified #}
+                    <div class="form-check">
+                        {{ form.checklist_information_certified }}
+                        <label class="form-check-label" for="{{ form.checklist_information_certified.id_for_label }}">
+                            {{ form.checklist_information_certified.label }}
+                        </label>
+                    </div>
+                    {% if form.checklist_information_certified.errors %}
+                        <div class="invalid-feedback d-block ps-4" style="font-size:0.8125rem;">
+                            {{ form.checklist_information_certified.errors.0 }}
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            {# Action bar #}
+            <div class="rg-pub-action-bar">
+                <a href="{% url 'applicant-vacancy-detail' entry.pk %}" class="btn btn-outline-secondary">
+                    &larr; Back to Position Details
+                </a>
+                <button type="submit" class="btn btn-rg-primary btn-lg">
+                    Continue to Email Verification &rarr;
+                </button>
+            </div>
+            <p style="font-size:0.8125rem; color:#5f6c78; margin-top:0.75rem; text-align:right;">
+                After submitting, you will verify your email address with a code before your application is finalized.
+            </p>
+        </div>
+
+    </form>
+
+</div>
+
+{# Footer #}
+<footer style="background:#fff; border-top:1px solid #d7dde3; margin-top:2rem; padding:1.25rem 0;">
+    <div class="rg-pub-wrap" style="padding-block:0; text-align:center;">
+        <p style="margin:0; font-size:0.8125rem; color:#6b7280;">
+            Questions? Email <a href="mailto:recruitment@chd4a.doh.gov.ph" style="color:#005a87;">recruitment@chd4a.doh.gov.ph</a>
+        </p>
+    </div>
+</footer>
 {% endblock %}

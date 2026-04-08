@@ -14,13 +14,7 @@
 {% endblock %}
 
 {% block body_background %}
-background: #f5f6f7;
-{% endblock %}
-
-{% block extra_styles %}
-.text-rg-primary {
-    color: var(--rg-primary) !important;
-}
+background: #f5f6f8;
 {% endblock %}
 
 {% block site_header %}
@@ -29,18 +23,25 @@ background: #f5f6f7;
         <div class="rg-topbar__group">
             <a class="rg-brand rg-public-brand" href="{% url 'applicant-portal' %}">
                 <span class="rg-brand-copy">
-                    <span class="rg-brand-kicker">Department of Health - CHD CALABARZON</span>
+                    <span class="rg-brand-kicker">Department of Health &ndash; CHD CALABARZON</span>
                     <span class="rg-brand-title">RecruitGuard-CHD</span>
                 </span>
             </a>
         </div>
-        <div class="rg-nav-actions rg-public-nav">
-            <a href="{% url 'applicant-portal' %}" class="rg-nav-link rg-nav-link--{% if request.resolver_match.url_name == 'applicant-portal' %}primary{% else %}secondary{% endif %}">Vacancies</a>
-            <a href="{% url 'applicant-status-lookup' %}" class="rg-nav-link rg-nav-link--{% if request.resolver_match.url_name == 'applicant-status-lookup' %}primary{% else %}secondary{% endif %}">Track Application</a>
-            <a href="{% url 'applicant-portal' %}#help-section" class="rg-nav-link rg-nav-link--secondary">Help</a>
-            <span class="rg-public-nav__divider" aria-hidden="true"></span>
-            <a href="{% url 'login' %}" class="rg-secondary-link rg-public-staff-link">Staff Portal</a>
-        </div>
+        <nav class="rg-nav-actions rg-public-nav" aria-label="Applicant navigation">
+            <a href="{% url 'applicant-portal' %}"
+               class="rg-nav-link rg-nav-link--{% if request.resolver_match.url_name == 'applicant-portal' or request.resolver_match.url_name == 'applicant-vacancy-detail' %}primary{% else %}secondary{% endif %}">
+                Job Openings
+            </a>
+            <a href="{% url 'applicant-status-lookup' %}"
+               class="rg-nav-link rg-nav-link--{% if request.resolver_match.url_name == 'applicant-status-lookup' %}primary{% else %}secondary{% endif %}">
+                Track Application
+            </a>
+            <a href="{% url 'applicant-help' %}"
+               class="rg-nav-link rg-nav-link--{% if request.resolver_match.url_name == 'applicant-help' %}primary{% else %}secondary{% endif %}">
+                Help
+            </a>
+        </nav>
     </div>
 </header>
 {% endblock %}

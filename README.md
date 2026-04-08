@@ -1,37 +1,134 @@
 # RecruitGuard-CHD
 
-RecruitGuard-CHD is a secure-by-design Django prototype for DOH-CHD CALABARZON recruitment. The current baseline includes internal identity and access control, applicant intake with OTP verification, recruitment entry management, branch-aware workflow handling, level-aware routing, stage-locked records, notification history, encrypted evidence storage, audit logging, and controlled export.
+RecruitGuard-CHD is a secure-by-design Django recruitment management prototype for DOH-CHD CALABARZON. The repository currently implements one shared platform, one shared database, and one shared workflow engine for two recruitment branches: Plantilla and COS.
 
-The UI is split into two portals while keeping one shared backend, one shared database, and one shared workflow engine:
+The project is split into two portals:
 
-- Applicant Portal under `/apply/` for public intake, OTP verification, receipt, and status lookup
-- Internal Portal under `/internal/` for staff authentication, routing, workflow, evaluation, records, audit, and export
+- Applicant Portal at `/apply/`
+- Internal Portal at `/internal/`
 
-## Implemented scope
+## Current project status
 
-- One Django platform and one database schema
-- Internal authentication and role-aware access control for the locked internal actor set
-- Position catalog plus branch-aware recruitment entry management for Plantilla and COS
-- Public applicant intake, OTP verification, receipt, and status lookup
-- Branch-aware applications for Plantilla and COS
-- Level-aware submission routing with Level 1 -> Secretariat and Level 2 -> HRM Chief
-- Secretariat is blocked from processing Level 2 unless a system-admin override is granted and audit-logged
+The repository is already beyond a starter scaffold. The current codebase includes models, forms, views, templates, services, migrations, admin registrations, and automated tests for the thesis-aligned recruitment workflow.
+
+Implemented now:
+
+- Internal identity and access control for the locked actor set: Applicant, Secretariat, HRM Chief, HRMPSB Member, Appointing Authority, and System Administrator
+- Protected internal login, logout, password change, and internal account management
+- Position catalog management plus recruitment entry management for Plantilla and COS
+- Public applicant intake with required document uploads, OTP verification, receipt generation, and status lookup
 - Branch-aware workflow handling for Plantilla and COS
-- Plantilla supports screening, exam, interview, deliberation, Comparative Assessment Report generation, final decision, completion tracking, and controlled case closure
-- COS follows a lighter path, skips HRMPSB endorsement, and supports the applicable screening, interview, deliberation, final decision, completion, and closure steps
-- Notification logging for submission, selection, non-selection, checklist, and reminder emails
-- Evidence Vault with SHA-256 digesting and AES-256-GCM encryption at rest
-- Application and system audit trails, routing history, and protected-record access logging
-- Controlled export package using ReportLab and zipfile with evidence inventory, routing history, audit log, submission packet, and verification outputs
-- Automated tests covering the major workflow, audit, notification, completion, and export paths
+- Level-aware routing with `Level 1 -> Secretariat` and `Level 2 -> HRM Chief`
+- Secretariat restriction for Level 2 cases, with controlled and audit-logged override support
+- Screening, examination, interview scheduling, direct ratings, fallback interview uploads, deliberation, and decision-support handling
+- Comparative Assessment Report generation for Plantilla, including entry-scoped versioning
+- Final decision recording, completion tracking, controlled reopen, and case closure
+- Notification logging and email dispatch for submission acknowledgment, selected, non-selected, checklist, and reminder notices
+- Evidence Vault storage with SHA-256 integrity digests, AES-256-GCM encrypted payload storage, archive toggling, and controlled download
+- Recruitment audit logging, routing history, protected-record access logging, and controlled export bundle generation
 
-## Local setup
+Current repository boundaries:
 
-### Quick start on Windows PowerShell
+- Recruitment handling only
+- Full onboarding, offboarding, payroll, termination, and full employee lifecycle functions are out of scope
+- PostgreSQL is supported through environment variables, but SQLite is currently used automatically for local bootstrap if PostgreSQL settings are left blank
+- OTP and notification email flows require valid SMTP credentials in `.env`
+
+The automated test suite currently includes 94 Django tests covering identity, intake, routing, workflow, evaluation, evidence, notification, completion, decision, audit, and export paths.
+
+## Locked stack
+
+- Python 3
+- Django
+- Django Templates
+- Bootstrap
+- PostgreSQL
+- Gmail SMTP for OTP and email notifications
+- `hashlib` for SHA-256
+- `cryptography` for AES-256-GCM
+- ReportLab
+- Python `zipfile`
+
+## First-time setup
+
+### Windows PowerShell
 
 ```powershell
-cd C:\Users\Jerico\Documents\RecruitGuard-CHD
+git clone https://github.com/strongestleugim/RecruitGuard-CHD.git
+cd RecruitGuard-CHD
+py -3 -m venv .venv
 .\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+Copy-Item .env.example .env
+```
+
+Edit `.env` before continuing.
+
+Minimum values to review in `.env`:
+
+- `DJANGO_SECRET_KEY`
+- `APPLICATION_OTP_HASH_SECRET`
+- `EVIDENCE_ENCRYPTION_SECRET`
+- `EMAIL_HOST_USER`
+- `EMAIL_HOST_PASSWORD`
+- `DEFAULT_FROM_EMAIL`
+
+Optional local-development database behavior:
+
+- Leave `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` blank to use SQLite locally
+- Set `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_HOST`, and `POSTGRES_PORT` to use PostgreSQL
+
+Continue with database setup and the first internal admin account:
+
+```powershell
+python manage.py migrate
+python manage.py createsuperuser --username admin --email admin@example.com
+python manage.py shell -c "from django.contrib.auth import get_user_model; User = get_user_model(); user = User.objects.get(username='admin'); user.role = User.Role.SYSTEM_ADMIN; user.save()"
+python manage.py check
+python manage.py test recruitment
+python manage.py runserver
+```
+
+### macOS / Linux
+
+```bash
+git clone https://github.com/strongestleugim/RecruitGuard-CHD.git
+cd RecruitGuard-CHD
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+cp .env.example .env
+```
+
+Edit `.env` before continuing, then run:
+
+```bash
+python manage.py migrate
+python manage.py createsuperuser --username admin --email admin@example.com
+python manage.py shell -c "from django.contrib.auth import get_user_model; User = get_user_model(); user = User.objects.get(username='admin'); user.role = User.Role.SYSTEM_ADMIN; user.save()"
+python manage.py check
+python manage.py test recruitment
+python manage.py runserver
+```
+
+## How to run the server after first-time setup
+
+### Windows PowerShell
+
+```powershell
+cd C:\path\to\RecruitGuard-CHD
+.\.venv\Scripts\Activate.ps1
+python manage.py migrate
+python manage.py runserver
+```
+
+### macOS / Linux
+
+```bash
+cd /path/to/RecruitGuard-CHD
+source .venv/bin/activate
 python manage.py migrate
 python manage.py runserver
 ```
@@ -39,36 +136,18 @@ python manage.py runserver
 Open these URLs after the server starts:
 
 - Applicant portal: `http://127.0.0.1:8000/apply/`
+- Applicant status lookup: `http://127.0.0.1:8000/apply/status/`
 - Internal login: `http://127.0.0.1:8000/internal/login/`
+- Internal dashboard: `http://127.0.0.1:8000/internal/`
 - Django admin: `http://127.0.0.1:8000/admin/`
 
-### First-time setup
+## First internal account note
 
-1. Create and activate a virtual environment if `.venv` does not already exist.
-2. Install dependencies with `pip install -r requirements.txt`.
-3. Copy `.env.example` to `.env` and set the required values for:
-   - `DJANGO_SECRET_KEY`
-   - `APPLICATION_OTP_HASH_SECRET`
-   - `EVIDENCE_ENCRYPTION_SECRET`
-   - Gmail SMTP settings such as `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, and `DEFAULT_FROM_EMAIL`
-4. Run `python manage.py migrate`.
-5. Create an admin account with `python manage.py createsuperuser`.
-6. Run `python manage.py check`.
-7. Run the test suite with `python manage.py test recruitment`.
-8. Start the server with `python manage.py runserver`.
+`createsuperuser` gives you Django admin access, but the internal portal only allows internal roles. That is why the setup commands above also set the account role to `system_admin`.
 
-SQLite is used automatically for local development if PostgreSQL environment variables are not set. PostgreSQL settings remain ready for later deployment, and media/static paths plus basic security cookie settings are already configured in the base project.
+After logging into `/internal/login/` as that account, you can create the rest of the internal users from the protected internal user management screens.
 
-## Portal entry points
-
-- Public Applicant Portal: `/apply/`
-- Internal Portal login: `/internal/login/`
-- Internal Portal dashboard: `/internal/`
-- Django admin: `/admin/`
-
-## Manual role setup
-
-Create users through Django admin and assign these roles:
+Internal roles used by the system:
 
 - `applicant`
 - `secretariat`
@@ -77,8 +156,18 @@ Create users through Django admin and assign these roles:
 - `appointing_authority`
 - `system_admin`
 
-## Thesis-aligned boundaries
+## Useful entry points
 
-- Full onboarding, offboarding, payroll, and full employee lifecycle remain out of scope.
-- Applicant pages do not expose internal workflow navigation.
-- Internal portal access remains server-side protected and limited to authenticated internal users.
+- Public applicant portal: `/apply/`
+- Public status lookup: `/apply/status/`
+- Internal login: `/internal/login/`
+- Workflow queue: `/internal/workflow/queue/`
+- Evidence vault: `/internal/evidence/`
+- Audit log: `/internal/audit/`
+- Django admin: `/admin/`
+
+## Notes for reviewers and first-time users
+
+- If SMTP credentials are missing or invalid, the server will still start, but applicant OTP sending and email notifications will fail when triggered.
+- The System Administrator role does not automatically get unrestricted case-content visibility; the repo intentionally keeps access server-side and workflow-aware.
+- Django admin access is restricted to actual Django superusers. Normal internal operations are meant to happen in the internal portal.

@@ -1031,14 +1031,19 @@ textarea.form-control {
 }
 
 .rg-auth-shell {
-    padding-top: 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 2rem 1rem;
 }
 
 .rg-auth-grid {
     display: grid;
-    grid-template-columns: minmax(0, 0.95fr) minmax(320px, 0.75fr);
+    grid-template-columns: minmax(0, 1fr);
     gap: 1.25rem;
-    align-items: stretch;
+    width: 100%;
+    max-width: 480px;
 }
 
 .rg-auth-panel,
@@ -1935,6 +1940,1206 @@ textarea.form-control {
     padding: 1.25rem 1.5rem 3rem;
     background: #f5f6f7;
     overflow-y: auto;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   APPLICANT PORTAL — REDESIGNED PUBLIC COMPONENTS
+   ─ Prefix: .rg-pub-*
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Public body overrides ─────────────────────────────────── */
+.applicant-portal-body {
+    background: #f5f6f8;
+}
+
+.applicant-portal-body .site-shell {
+    padding-bottom: 0;
+}
+
+/* ── Page wrapper ────────────────────────────────────────────── */
+.rg-pub-wrap {
+    width: min(760px, calc(100% - 2rem));
+    margin-inline: auto;
+    padding-block: 2rem 3rem;
+}
+
+.rg-pub-wrap--narrow {
+    max-width: 600px;
+}
+
+.rg-pub-wrap--form {
+    max-width: 640px;
+}
+
+/* ── Breadcrumb ──────────────────────────────────────────────── */
+.rg-pub-breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin-bottom: 1.25rem;
+    font-size: 0.8125rem;
+    color: #5f6c78;
+}
+
+.rg-pub-breadcrumb a {
+    color: #005a87;
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.rg-pub-breadcrumb a:hover {
+    text-decoration: underline;
+}
+
+.rg-pub-breadcrumb__sep {
+    color: #9aa4af;
+}
+
+/* ── Page header ─────────────────────────────────────────────── */
+.rg-pub-page-header {
+    margin-bottom: 1.75rem;
+}
+
+.rg-pub-page-title {
+    margin: 0 0 0.35rem;
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: #111827;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+}
+
+.rg-pub-page-copy {
+    margin: 0;
+    font-size: 0.9375rem;
+    color: #5f6c78;
+    line-height: 1.6;
+}
+
+/* ── Back link ───────────────────────────────────────────────── */
+.rg-pub-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-bottom: 1rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #005a87;
+    text-decoration: none;
+}
+
+.rg-pub-back:hover {
+    text-decoration: underline;
+    color: #004d72;
+}
+
+/* ── Landing hero ────────────────────────────────────────────── */
+.rg-pub-hero {
+    text-align: center;
+    padding: 2.5rem 1rem 2rem;
+}
+
+.rg-pub-hero__seal {
+    display: block;
+    width: 64px;
+    height: 64px;
+    margin: 0 auto 1rem;
+    object-fit: contain;
+}
+
+.rg-pub-hero__title {
+    margin: 0 0 0.6rem;
+    font-size: clamp(1.5rem, 4vw, 2rem);
+    font-weight: 700;
+    color: #111827;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+}
+
+.rg-pub-hero__copy {
+    max-width: 52ch;
+    margin: 0 auto 2rem;
+    font-size: 1rem;
+    color: #5f6c78;
+    line-height: 1.65;
+}
+
+.rg-pub-hero__actions {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-bottom: 1.25rem;
+}
+
+.rg-pub-hero__trust {
+    font-size: 0.8125rem;
+    color: #9aa4af;
+}
+
+/* ── Action cards (landing) ──────────────────────────────────── */
+.rg-pub-action-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1rem;
+    max-width: 600px;
+    margin: 0 auto 1.5rem;
+}
+
+.rg-pub-action-card {
+    display: flex;
+    flex-direction: column;
+    padding: 1.5rem;
+    border: 1px solid #d7dde3;
+    border-radius: 10px;
+    background: #fff;
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.rg-pub-action-card:hover {
+    border-color: #005a87;
+    box-shadow: 0 4px 12px rgba(0,90,135,0.1);
+    color: inherit;
+    text-decoration: none;
+}
+
+.rg-pub-action-card__icon {
+    font-size: 1.5rem;
+    margin-bottom: 0.75rem;
+    line-height: 1;
+}
+
+.rg-pub-action-card__title {
+    margin: 0 0 0.35rem;
+    font-size: 1rem;
+    font-weight: 700;
+    color: #111827;
+}
+
+.rg-pub-action-card__copy {
+    margin: 0 0 1.25rem;
+    font-size: 0.875rem;
+    color: #5f6c78;
+    line-height: 1.55;
+    flex: 1;
+}
+
+.rg-pub-action-card__cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #005a87;
+}
+
+/* ── Filter bar ──────────────────────────────────────────────── */
+.rg-pub-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: center;
+    padding: 0.85rem 1rem;
+    background: #fff;
+    border: 1px solid #d7dde3;
+    border-radius: 8px;
+    margin-bottom: 1.25rem;
+}
+
+.rg-pub-filters .form-select {
+    min-height: 2.5rem;
+    font-size: 0.875rem;
+    flex: 1;
+    min-width: 160px;
+    max-width: 280px;
+    border-radius: 6px;
+}
+
+.rg-pub-result-count {
+    font-size: 0.8125rem;
+    color: #5f6c78;
+    margin-bottom: 0.75rem;
+}
+
+/* ── Job opening card ────────────────────────────────────────── */
+.rg-pub-job-card {
+    display: block;
+    padding: 1.1rem 1.25rem;
+    border: 1px solid #d7dde3;
+    border-left-width: 4px;
+    border-radius: 8px;
+    background: #fff;
+    text-decoration: none;
+    color: inherit;
+    margin-bottom: 0.75rem;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    cursor: pointer;
+}
+
+.rg-pub-job-card:hover {
+    border-color: #005a87;
+    box-shadow: 0 3px 10px rgba(0,90,135,0.08);
+    color: inherit;
+    text-decoration: none;
+}
+
+.rg-pub-job-card--plantilla {
+    border-left-color: #005a87;
+}
+
+.rg-pub-job-card--cos {
+    border-left-color: #8c6b00;
+}
+
+.rg-pub-job-card__inner {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+}
+
+.rg-pub-job-card__body {
+    flex: 1;
+    min-width: 0;
+}
+
+.rg-pub-job-card__title {
+    margin: 0 0 0.25rem;
+    font-size: 1rem;
+    font-weight: 700;
+    color: #111827;
+    line-height: 1.3;
+}
+
+.rg-pub-job-card__meta {
+    margin: 0 0 0.5rem;
+    font-size: 0.8125rem;
+    color: #5f6c78;
+}
+
+.rg-pub-job-card__deadline {
+    font-size: 0.8125rem;
+    color: #374151;
+    font-weight: 500;
+}
+
+.rg-pub-job-card__deadline--urgent {
+    color: #b91c1c;
+    font-weight: 600;
+}
+
+.rg-pub-job-card__action {
+    flex-shrink: 0;
+    align-self: center;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #005a87;
+    white-space: nowrap;
+}
+
+/* ── Position header card (vacancy detail) ───────────────────── */
+.rg-pub-position-header {
+    padding: 1.5rem;
+    border: 1px solid #d7dde3;
+    border-radius: 10px;
+    background: #fff;
+    margin-bottom: 2rem;
+}
+
+.rg-pub-position-title {
+    margin: 0 0 0.75rem;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #111827;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+}
+
+.rg-pub-position-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.rg-pub-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.3rem 0.7rem;
+    border: 1px solid #d7dde3;
+    border-radius: 4px;
+    background: #f5f6f8;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: #374151;
+}
+
+.rg-pub-badge--type {
+    background: #eef5fc;
+    border-color: #c6dcf0;
+    color: #1a4e82;
+}
+
+.rg-pub-deadline-box {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 0.9rem;
+    border-radius: 6px;
+    background: #fff8e7;
+    border: 1px solid #ffe2a6;
+    font-size: 0.875rem;
+    color: #8a5a00;
+    font-weight: 500;
+    margin-bottom: 1.25rem;
+}
+
+.rg-pub-deadline-box--urgent {
+    background: #fff0ee;
+    border-color: #ffc5bc;
+    color: #a9342f;
+}
+
+/* ── Content section ─────────────────────────────────────────── */
+.rg-pub-section {
+    margin-top: 2rem;
+    padding-top: 1.75rem;
+    border-top: 1px solid #e5e9ed;
+}
+
+.rg-pub-section:first-of-type {
+    margin-top: 0;
+    border-top: none;
+    padding-top: 0;
+}
+
+.rg-pub-section__title {
+    margin: 0 0 0.75rem;
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #111827;
+}
+
+.rg-pub-section__copy {
+    font-size: 0.9375rem;
+    color: #374151;
+    line-height: 1.7;
+    margin-bottom: 0;
+}
+
+.rg-pub-doc-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 0.55rem;
+}
+
+.rg-pub-doc-list li {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    font-size: 0.9rem;
+    color: #374151;
+    line-height: 1.55;
+}
+
+.rg-pub-doc-list li::before {
+    content: "✓";
+    color: #15803d;
+    font-weight: 700;
+    font-size: 0.875rem;
+    flex-shrink: 0;
+    margin-top: 0.1rem;
+}
+
+.rg-pub-doc-list li.is-optional::before {
+    content: "○";
+    color: #9aa4af;
+}
+
+.rg-pub-doc-list li .rg-pub-optional-tag {
+    font-size: 0.8rem;
+    color: #9aa4af;
+    font-style: italic;
+}
+
+.rg-pub-download-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.8125rem;
+    color: #005a87;
+    text-decoration: none;
+    font-weight: 500;
+    margin-left: 0.5rem;
+}
+
+.rg-pub-download-link:hover {
+    text-decoration: underline;
+}
+
+/* ── Guidance / preparation page ────────────────────────────── */
+.rg-pub-checklist-box {
+    padding: 1.25rem 1.5rem;
+    background: #f8fafb;
+    border: 1px solid #d7dde3;
+    border-radius: 10px;
+    margin-bottom: 1.25rem;
+}
+
+.rg-pub-checklist-box__title {
+    margin: 0 0 1rem;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #5f6c78;
+}
+
+.rg-pub-check-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    margin-bottom: 0.85rem;
+}
+
+.rg-pub-check-item:last-child {
+    margin-bottom: 0;
+}
+
+.rg-pub-check-icon {
+    flex-shrink: 0;
+    width: 1.25rem;
+    height: 1.25rem;
+    margin-top: 0.1rem;
+    color: #15803d;
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.25rem;
+}
+
+.rg-pub-check-item__text {
+    font-size: 0.9375rem;
+    color: #374151;
+    line-height: 1.55;
+}
+
+.rg-pub-check-item__sublist {
+    list-style: disc;
+    padding-left: 1.1rem;
+    margin: 0.45rem 0 0;
+    font-size: 0.875rem;
+    color: #5f6c78;
+}
+
+.rg-pub-check-item__sublist li + li {
+    margin-top: 0.2rem;
+}
+
+.rg-pub-steps-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 0.75rem;
+}
+
+.rg-pub-steps-list li {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.85rem;
+    font-size: 0.9375rem;
+    color: #374151;
+}
+
+.rg-pub-step-num {
+    flex-shrink: 0;
+    width: 1.75rem;
+    height: 1.75rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: #005a87;
+    color: #fff;
+    font-size: 0.8125rem;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.rg-pub-info-box {
+    padding: 1rem 1.25rem;
+    border-radius: 8px;
+    font-size: 0.875rem;
+    line-height: 1.6;
+    margin-bottom: 1.25rem;
+}
+
+.rg-pub-info-box--info {
+    background: #edf5ff;
+    border-left: 4px solid #005a87;
+    color: #1a4e82;
+}
+
+.rg-pub-info-box--warning {
+    background: #fff8e7;
+    border-left: 4px solid #d2a000;
+    color: #7a5500;
+}
+
+.rg-pub-info-box--success {
+    background: #f0fdf4;
+    border-left: 4px solid #15803d;
+    color: #14532d;
+}
+
+.rg-pub-info-box p {
+    margin: 0 0 0.4rem;
+}
+
+.rg-pub-info-box p:last-child {
+    margin: 0;
+}
+
+/* ── Progress stepper ────────────────────────────────────────── */
+.rg-pub-stepper {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    padding: 1rem 1.5rem;
+    background: #fff;
+    border-bottom: 1px solid #d7dde3;
+    overflow-x: auto;
+}
+
+.rg-pub-stepper__step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.35rem;
+    flex-shrink: 0;
+}
+
+.rg-pub-stepper__circle {
+    width: 2rem;
+    height: 2rem;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8125rem;
+    font-weight: 700;
+    border: 2px solid #d7dde3;
+    background: #fff;
+    color: #9aa4af;
+    transition: all 0.2s;
+}
+
+.rg-pub-stepper__step--active .rg-pub-stepper__circle {
+    background: #005a87;
+    border-color: #005a87;
+    color: #fff;
+}
+
+.rg-pub-stepper__step--done .rg-pub-stepper__circle {
+    background: #005a87;
+    border-color: #005a87;
+    color: #fff;
+}
+
+.rg-pub-stepper__label {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: #9aa4af;
+    white-space: nowrap;
+}
+
+.rg-pub-stepper__step--active .rg-pub-stepper__label {
+    color: #005a87;
+    font-weight: 700;
+}
+
+.rg-pub-stepper__step--done .rg-pub-stepper__label {
+    color: #5f6c78;
+}
+
+.rg-pub-stepper__connector {
+    flex: 1;
+    height: 2px;
+    background: #d7dde3;
+    min-width: 1.5rem;
+    margin-bottom: 1.25rem;
+    transition: background 0.2s;
+}
+
+.rg-pub-stepper__connector--done {
+    background: #005a87;
+}
+
+.rg-pub-stepper-label {
+    font-size: 0.8125rem;
+    color: #5f6c78;
+    padding: 0.4rem 1.5rem 0.75rem;
+    background: #fff;
+    border-bottom: 1px solid #d7dde3;
+}
+
+/* ── Form section group ──────────────────────────────────────── */
+.rg-pub-form-group {
+    margin-bottom: 2rem;
+}
+
+.rg-pub-form-group__heading {
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #5f6c78;
+    border-top: 1px solid #e5e9ed;
+    padding-top: 1.25rem;
+    margin-bottom: 1rem;
+    margin-top: 0;
+}
+
+.rg-pub-form-group:first-of-type .rg-pub-form-group__heading {
+    border-top: none;
+    padding-top: 0;
+}
+
+.rg-pub-field {
+    margin-bottom: 1rem;
+}
+
+.rg-pub-field label {
+    display: block;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #374151;
+    margin-bottom: 0.35rem;
+}
+
+.rg-pub-field .form-control,
+.rg-pub-field .form-select {
+    font-size: 1rem;
+    min-height: 2.75rem;
+}
+
+.rg-pub-field .form-text {
+    font-size: 0.8125rem;
+}
+
+/* ── Upload slot ─────────────────────────────────────────────── */
+.rg-pub-upload-slot {
+    padding: 1rem 1.25rem;
+    border: 1px solid #d7dde3;
+    border-radius: 8px;
+    background: #fff;
+    margin-bottom: 0.75rem;
+    transition: border-color 0.15s;
+}
+
+.rg-pub-upload-slot--complete {
+    border-color: #86efac;
+    background: #f0fdf4;
+}
+
+.rg-pub-upload-slot--error {
+    border-color: #fca5a5;
+    background: #fff5f5;
+}
+
+.rg-pub-upload-slot__name {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #111827;
+    margin: 0 0 0.25rem;
+}
+
+.rg-pub-upload-slot__hint {
+    font-size: 0.8125rem;
+    color: #5f6c78;
+    margin: 0 0 0.75rem;
+    line-height: 1.5;
+}
+
+.rg-pub-upload-slot__success {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.5rem 0.75rem;
+    background: #dcfce7;
+    border: 1px solid #86efac;
+    border-radius: 6px;
+    font-size: 0.8125rem;
+    color: #15803d;
+}
+
+.rg-pub-upload-slot__success-name {
+    font-weight: 500;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.rg-pub-upload-slot__remove {
+    background: none;
+    border: none;
+    font-size: 0.8125rem;
+    color: #dc2626;
+    font-weight: 500;
+    cursor: pointer;
+    padding: 0;
+    flex-shrink: 0;
+}
+
+.rg-pub-upload-slot__remove:hover {
+    text-decoration: underline;
+}
+
+.rg-pub-optional-tag {
+    display: inline-block;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: #9aa4af;
+    background: #f5f6f8;
+    border: 1px solid #d7dde3;
+    border-radius: 4px;
+    padding: 0 0.4rem;
+    margin-left: 0.4rem;
+    vertical-align: middle;
+}
+
+.rg-pub-tips-box {
+    padding: 1rem 1.25rem;
+    background: #f8fafb;
+    border: 1px solid #d7dde3;
+    border-radius: 8px;
+    margin-top: 1rem;
+    font-size: 0.875rem;
+    color: #374151;
+}
+
+.rg-pub-tips-box__title {
+    font-weight: 700;
+    margin: 0 0 0.5rem;
+    color: #374151;
+}
+
+.rg-pub-tips-box ul {
+    margin: 0;
+    padding-left: 1.1rem;
+}
+
+.rg-pub-tips-box ul li + li {
+    margin-top: 0.3rem;
+}
+
+/* ── OTP verification ────────────────────────────────────────── */
+.rg-pub-otp-card {
+    max-width: 480px;
+    margin: 0 auto;
+    padding: 2rem;
+    border: 1px solid #d7dde3;
+    border-radius: 12px;
+    background: #fff;
+}
+
+.rg-pub-otp-email {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 0.85rem;
+    background: #f0f4f8;
+    border-radius: 6px;
+    margin-bottom: 1.5rem;
+    font-size: 0.875rem;
+    color: #374151;
+}
+
+.rg-pub-otp-email strong {
+    font-weight: 700;
+    color: #111827;
+}
+
+.rg-pub-otp-input {
+    font-size: 1.5rem !important;
+    letter-spacing: 0.35em;
+    text-align: center;
+    font-weight: 700;
+    font-family: 'Courier New', monospace;
+    max-width: 240px;
+    margin: 0 auto 1rem;
+    display: block;
+}
+
+.rg-pub-otp-help {
+    margin-top: 1.25rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid #e5e9ed;
+    font-size: 0.875rem;
+    color: #5f6c78;
+}
+
+.rg-pub-otp-help ul {
+    margin: 0.35rem 0 0.75rem;
+    padding-left: 1.1rem;
+}
+
+.rg-pub-otp-help li + li {
+    margin-top: 0.2rem;
+}
+
+.rg-pub-resend-link {
+    color: #005a87;
+    font-weight: 600;
+    cursor: pointer;
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: inherit;
+    font-family: inherit;
+}
+
+.rg-pub-resend-link:disabled {
+    color: #9aa4af;
+    cursor: default;
+}
+
+.rg-pub-resend-link:not(:disabled):hover {
+    text-decoration: underline;
+}
+
+/* ── Review cards ────────────────────────────────────────────── */
+.rg-pub-review-card {
+    border: 1px solid #d7dde3;
+    border-radius: 8px;
+    background: #fff;
+    margin-bottom: 0.85rem;
+    overflow: hidden;
+}
+
+.rg-pub-review-card__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 1.25rem;
+    background: #f8fafb;
+    border-bottom: 1px solid #d7dde3;
+}
+
+.rg-pub-review-card__title {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #374151;
+    margin: 0;
+}
+
+.rg-pub-review-card__edit {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: #005a87;
+    text-decoration: none;
+}
+
+.rg-pub-review-card__edit:hover {
+    text-decoration: underline;
+}
+
+.rg-pub-review-card__body {
+    padding: 1rem 1.25rem;
+}
+
+.rg-pub-review-dl {
+    display: grid;
+    gap: 0.55rem;
+}
+
+.rg-pub-review-row {
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    gap: 0.75rem;
+    align-items: baseline;
+    font-size: 0.9rem;
+    padding-bottom: 0.45rem;
+    border-bottom: 1px solid #f0f2f4;
+}
+
+.rg-pub-review-row:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.rg-pub-review-row dt {
+    font-weight: 600;
+    color: #5f6c78;
+    font-size: 0.8125rem;
+}
+
+.rg-pub-review-row dd {
+    color: #111827;
+    margin: 0;
+    word-break: break-word;
+}
+
+.rg-pub-doc-review-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 0.45rem;
+}
+
+.rg-pub-doc-review-list li {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 0.875rem;
+    color: #374151;
+}
+
+.rg-pub-doc-review-list li.is-skipped {
+    color: #9aa4af;
+}
+
+.rg-pub-doc-check {
+    color: #15803d;
+    font-size: 0.875rem;
+    flex-shrink: 0;
+}
+
+.rg-pub-doc-dash {
+    color: #d1d5db;
+    flex-shrink: 0;
+}
+
+/* ── Confirmation checkboxes ─────────────────────────────────── */
+.rg-pub-confirm-box {
+    padding: 1.25rem 1.5rem;
+    background: #f8fafb;
+    border: 1px solid #d7dde3;
+    border-radius: 10px;
+    margin-bottom: 1.5rem;
+}
+
+.rg-pub-confirm-box .form-check {
+    margin-bottom: 0.75rem;
+    align-items: flex-start;
+}
+
+.rg-pub-confirm-box .form-check:last-child {
+    margin-bottom: 0;
+}
+
+.rg-pub-confirm-box .form-check-input {
+    width: 1.1rem;
+    height: 1.1rem;
+    margin-top: 0.2rem;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+.rg-pub-confirm-box .form-check-label {
+    font-size: 0.875rem;
+    font-weight: 400;
+    color: #374151;
+    line-height: 1.55;
+    cursor: pointer;
+}
+
+/* ── Action bar ──────────────────────────────────────────────── */
+.rg-pub-action-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid #e5e9ed;
+    margin-top: 1.5rem;
+}
+
+.rg-pub-action-bar--end {
+    justify-content: flex-end;
+}
+
+/* ── Receipt page ────────────────────────────────────────────── */
+.rg-pub-success-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 4rem;
+    height: 4rem;
+    border-radius: 50%;
+    background: #15803d;
+    color: #fff;
+    font-size: 1.75rem;
+    margin: 0 auto 1rem;
+    animation: rg-pub-pop 0.3s ease-out;
+}
+
+@keyframes rg-pub-pop {
+    from { transform: scale(0.5); opacity: 0; }
+    to   { transform: scale(1);   opacity: 1; }
+}
+
+.rg-pub-receipt-id {
+    font-size: 1.65rem;
+    font-weight: 700;
+    font-family: 'Courier New', monospace;
+    letter-spacing: 0.05em;
+    color: #111827;
+    text-align: center;
+    margin: 0.35rem 0 0.5rem;
+}
+
+.rg-pub-receipt-card {
+    padding: 1.5rem;
+    border: 1px solid #d7dde3;
+    border-radius: 10px;
+    background: #fff;
+    text-align: center;
+    margin-bottom: 1.5rem;
+}
+
+/* ── Status lookup ───────────────────────────────────────────── */
+.rg-pub-status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.45rem 1rem;
+    border-radius: 6px;
+    font-size: 0.875rem;
+    font-weight: 700;
+}
+
+.rg-pub-status-badge--review {
+    background: #edf5ff;
+    color: #1a4e82;
+    border: 1px solid #c6dcf0;
+}
+
+.rg-pub-status-badge--evaluation {
+    background: #f0f4ff;
+    color: #3730a3;
+    border: 1px solid #c7d2fe;
+}
+
+.rg-pub-status-badge--approved {
+    background: #f0fdf4;
+    color: #15803d;
+    border: 1px solid #86efac;
+}
+
+.rg-pub-status-badge--not-selected {
+    background: #f8f9fa;
+    color: #5f6c78;
+    border: 1px solid #d7dde3;
+}
+
+.rg-pub-status-badge--returned {
+    background: #fff8e7;
+    color: #8a5a00;
+    border: 1px solid #ffe2a6;
+}
+
+/* ── Help / FAQ ──────────────────────────────────────────────── */
+.rg-pub-faq-group-title {
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #5f6c78;
+    margin: 2rem 0 0.75rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid #e5e9ed;
+}
+
+.rg-pub-faq-group-title:first-of-type {
+    margin-top: 0;
+}
+
+.rg-pub-contact-box {
+    padding: 1.5rem;
+    background: #f8fafb;
+    border: 1px solid #d7dde3;
+    border-radius: 10px;
+    margin-top: 2rem;
+}
+
+.rg-pub-contact-box__title {
+    margin: 0 0 1rem;
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #111827;
+}
+
+.rg-pub-contact-box a {
+    color: #005a87;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.rg-pub-contact-box a:hover {
+    text-decoration: underline;
+}
+
+/* ── Responsive ──────────────────────────────────────────────── */
+@media (max-width: 575.98px) {
+    .rg-pub-wrap {
+        width: 100%;
+        padding-inline: 1rem;
+    }
+
+    .rg-pub-review-row {
+        grid-template-columns: 1fr;
+        gap: 0.15rem;
+    }
+
+    .rg-pub-review-row dt {
+        font-size: 0.75rem;
+    }
+
+    .rg-pub-stepper {
+        padding: 0.75rem 1rem;
+    }
+
+    .rg-pub-stepper__label {
+        display: none;
+    }
+
+    .rg-pub-stepper-label {
+        display: block;
+    }
+
+    .rg-pub-action-bar {
+        flex-direction: column-reverse;
+        align-items: stretch;
+    }
+
+    .rg-pub-action-bar .btn {
+        width: 100%;
+        text-align: center;
+    }
+
+    .rg-pub-position-title {
+        font-size: 1.25rem;
+    }
+
+    .rg-pub-hero__title {
+        font-size: 1.4rem;
+    }
+
+    .rg-pub-otp-card {
+        padding: 1.25rem;
+    }
+
+    .rg-pub-filters .form-select {
+        max-width: 100%;
+        width: 100%;
+    }
 }
 
 /* ── Pipeline ── */
