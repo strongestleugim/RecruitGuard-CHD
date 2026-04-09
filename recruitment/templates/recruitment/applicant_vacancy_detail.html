@@ -26,8 +26,8 @@
             {% else %}
                 <span class="rg-pub-badge rg-pub-badge--type">Contract of Service</span>
             {% endif %}
-            {% if entry.unit %}
-                <span class="rg-pub-badge">{{ entry.unit }}</span>
+            {% if entry.official_office_label %}
+                <span class="rg-pub-badge">{{ entry.official_office_label }}</span>
             {% endif %}
             {% if entry.job_code %}
                 <span class="rg-pub-badge" title="Item/Entry Code">Code: {{ entry.job_code }}</span>
@@ -65,21 +65,51 @@
     </div>
 
     {# About #}
-    {% if entry.description %}
+    {% if not entry.position_reference and entry.description %}
     <div class="rg-pub-section">
         <h2 class="rg-pub-section__title">About This Position</h2>
         <p class="rg-pub-section__copy">{{ entry.description }}</p>
     </div>
     {% endif %}
 
+    {% if entry.position_reference %}
+    <div class="rg-pub-section">
+        <h2 class="rg-pub-section__title">Official Position Reference</h2>
+        <div class="row g-3">
+            <div class="col-md-4">
+                <p class="rg-pub-section__copy mb-1"><strong>Salary Grade</strong></p>
+                <p class="rg-pub-section__copy mb-0">{% if entry.position_reference.salary_grade %}SG {{ entry.position_reference.salary_grade }}{% else %}Not recorded{% endif %}</p>
+            </div>
+            <div class="col-md-4">
+                <p class="rg-pub-section__copy mb-1"><strong>Level Classification</strong></p>
+                <p class="rg-pub-section__copy mb-0">{{ entry.position_reference.get_level_classification_display|default:"Not recorded" }}</p>
+            </div>
+            <div class="col-md-4">
+                <p class="rg-pub-section__copy mb-1"><strong>Class ID</strong></p>
+                <p class="rg-pub-section__copy mb-0">{{ entry.position_reference.class_id|default:"Not recorded" }}</p>
+            </div>
+            <div class="col-md-6">
+                <p class="rg-pub-section__copy mb-1"><strong>Occupational Service</strong></p>
+                <p class="rg-pub-section__copy mb-0">{{ entry.position_reference.occupational_service|default:"Not recorded" }}</p>
+            </div>
+            <div class="col-md-6">
+                <p class="rg-pub-section__copy mb-1"><strong>Occupational Group</strong></p>
+                <p class="rg-pub-section__copy mb-0">{{ entry.position_reference.occupational_group|default:"Not recorded" }}</p>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     {# Qualifications #}
-    {% if entry.qualification_reference or entry.requirements %}
+    {% if entry.qualification_reference or entry.position_reference and entry.position_reference.qualification_summary or not entry.position_reference and entry.requirements %}
     <div class="rg-pub-section">
         <h2 class="rg-pub-section__title">Qualifications</h2>
         {% if entry.qualification_reference %}
         <p class="rg-pub-section__copy" style="margin-bottom:0.75rem;">{{ entry.qualification_reference }}</p>
         {% endif %}
-        {% if entry.requirements %}
+        {% if entry.position_reference and entry.position_reference.qualification_summary %}
+        <div class="rg-pub-section__copy">{{ entry.position_reference.qualification_summary|linebreaksbr }}</div>
+        {% elif not entry.position_reference and entry.requirements %}
         <p class="rg-pub-section__copy">{{ entry.requirements }}</p>
         {% endif %}
     </div>

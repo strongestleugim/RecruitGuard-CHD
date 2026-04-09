@@ -24,7 +24,7 @@ from .models import (
     EvidenceVaultItem,
     FinalDecision,
     NotificationLog,
-    Position,
+    PositionReference,
     PositionPosting,
     RecruitmentApplication,
     RecruitmentCase,
@@ -41,6 +41,7 @@ from .services import (
     get_queue_for_user,
     grant_secretariat_override,
     issue_application_otp,
+    persist_position,
     process_workflow_action,
     record_final_decision,
     record_system_audit_event,
@@ -93,27 +94,20 @@ class BaseRecruitmentTestCase(TestCase):
             password="testpass123",
             role=RecruitmentUser.Role.SYSTEM_ADMIN,
         )
-        self.admin_aide_position = Position.objects.create(
-            position_code="POS-001",
-            title="Administrative Aide VI",
-            unit="HR Unit",
-            description="Administrative support role.",
-            requirements="Standard requirements.",
-        )
-        self.medical_officer_position = Position.objects.create(
-            position_code="POS-002",
-            title="Medical Officer V",
-            unit="Regional Office",
-            description="Clinical leadership role.",
-            requirements="Leadership requirements.",
-        )
-        self.project_assistant_position = Position.objects.create(
-            position_code="POS-003",
-            title="Project Technical Assistant",
-            unit="Special Projects",
-            description="Project support role.",
-            requirements="Flexible requirements.",
-        )
+        self.admin_aide_position = PositionReference.objects.get(position_title="Administrative Aide VI")
+        self.admin_aide_position.office_division_default = "HR Unit"
+        self.admin_aide_position.notes = "Administrative support role."
+        self.admin_aide_position.save(update_fields=["office_division_default", "notes", "updated_at"])
+
+        self.medical_officer_position = PositionReference.objects.get(position_title="Medical Officer V")
+        self.medical_officer_position.office_division_default = "Regional Office"
+        self.medical_officer_position.notes = "Clinical leadership role."
+        self.medical_officer_position.save(update_fields=["office_division_default", "notes", "updated_at"])
+
+        self.project_assistant_position = PositionReference.objects.get(position_title="Administrative Assistant I")
+        self.project_assistant_position.office_division_default = "Special Projects"
+        self.project_assistant_position.notes = "COS support role."
+        self.project_assistant_position.save(update_fields=["office_division_default", "notes", "updated_at"])
         self.level1_position = PositionPosting.objects.create(
             position_reference=self.admin_aide_position,
             job_code="PL-001",
@@ -511,30 +505,95 @@ class IdentityAdministrationTests(BaseRecruitmentTestCase):
 
 
 class RecruitmentEntryManagementTests(BaseRecruitmentTestCase):
-    def test_entry_manager_can_create_position_catalog_record(self):
+    def test_starter_position_reference_catalog_is_seeded(self):
+        self.assertTrue(
+            PositionReference.objects.filter(
+                position_title="Accountant II",
+                reference_status=PositionReference.ReferenceStatus.VERIFIED_REFERENCE,
+            ).exists()
+        )
+
+    def test_position_reference_slug_generation_is_collision_safe(self):
+        first = PositionReference.objects.create(
+            position_title="Budget Officer",
+            salary_grade=18,
+            level_classification=PositionReference.LevelClassification.SECOND_LEVEL,
+            class_id="BO1",
+            os_code="02-FS",
+            occupational_service="Financial Service",
+            occupational_group="Budgeting",
+            reference_status=PositionReference.ReferenceStatus.VERIFIED_REFERENCE,
+        )
+        second = PositionReference.objects.create(
+            position_title="Budget Officer",
+            salary_grade=19,
+            level_classification=PositionReference.LevelClassification.SECOND_LEVEL,
+            class_id="BO2",
+            os_code="02-FS",
+            occupational_service="Financial Service",
+            occupational_group="Budgeting",
+            reference_status=PositionReference.ReferenceStatus.VERIFIED_REFERENCE,
+        )
+
+        self.assertEqual(first.position_slug, "budget-officer")
+        self.assertEqual(second.position_slug, "budget-officer-2")
+
+    def test_persist_position_rejects_verified_reference_with_missing_official_metadata(self):
+        with self.assertRaises(ValidationError):
+            persist_position(
+                PositionReference(
+                    position_title="Half-Encoded Record",
+                    reference_status=PositionReference.ReferenceStatus.VERIFIED_REFERENCE,
+                    is_active=True,
+                ),
+                actor=self.sysadmin,
+                changed_fields=["position_title", "reference_status"],
+            )
+
+    def test_system_admin_can_create_position_reference_catalog_record(self):
         client = Client()
-        client.force_login(self.hrm_chief)
+        client.force_login(self.sysadmin)
         response = client.post(
             reverse("position-catalog-create"),
             {
+                "position_title": "Nurse II",
+                "position_slug": "",
+                "salary_grade": "15",
+                "level_classification": PositionReference.LevelClassification.SECOND_LEVEL,
+                "class_id": "NURS2",
+                "os_code": "09-MH",
+                "occupational_service": "Medicine and Health Service",
+                "occupational_group": "Nursing",
+                "reference_status": PositionReference.ReferenceStatus.VERIFIED_REFERENCE,
+                "notes": "Synthetic test record.",
                 "position_code": "POS-010",
-                "title": "Nurse II",
-                "unit": "Clinical Services",
-                "description": "Clinical nursing support role.",
-                "requirements": "PRC license required.",
-                "qualification_reference": "Plantilla nursing pool.",
+                "agency_item_number": "",
+                "office_division_default": "Clinical Services",
+                "qs_education": "Bachelor of Science in Nursing",
+                "qs_training": "",
+                "qs_experience": "",
+                "qs_eligibility": "RA 1080",
+                "employment_track_applicability": "plantilla",
                 "is_active": "on",
             },
         )
 
         self.assertEqual(response.status_code, 302)
-        self.assertTrue(Position.objects.filter(position_code="POS-010").exists())
+        self.assertTrue(PositionReference.objects.filter(position_title="Nurse II").exists())
         self.assertTrue(
             AuditLog.objects.filter(
                 action=AuditLog.Action.POSITION_CREATED,
-                metadata__position_code="POS-010",
+                metadata__position_title="Nurse II",
             ).exists()
         )
+
+    def test_entry_manager_cannot_create_position_reference_catalog_record(self):
+        client = Client()
+        client.force_login(self.hrm_chief)
+
+        response = client.get(reverse("position-catalog-create"))
+
+        self.assertEqual(response.status_code, 403)
 
     def test_plantilla_entry_requires_fixed_period_and_closing_date(self):
         entry = PositionPosting(
@@ -572,7 +631,6 @@ class RecruitmentEntryManagementTests(BaseRecruitmentTestCase):
                 "position_reference": self.project_assistant_position.pk,
                 "job_code": "COS-NEW",
                 "branch": PositionPosting.Branch.COS,
-                "level": PositionPosting.Level.LEVEL_2,
                 "intake_mode": PositionPosting.IntakeMode.CONTINUOUS,
                 "status": PositionPosting.EntryStatus.ACTIVE,
                 "publication_date": "",
@@ -586,12 +644,114 @@ class RecruitmentEntryManagementTests(BaseRecruitmentTestCase):
         created_entry = PositionPosting.objects.get(job_code="COS-NEW")
         self.assertEqual(created_entry.created_by, self.secretariat)
         self.assertEqual(created_entry.updated_by, self.secretariat)
+        self.assertEqual(created_entry.position_reference, self.project_assistant_position)
+        self.assertEqual(created_entry.title, self.project_assistant_position.position_title)
+        self.assertEqual(created_entry.level, PositionPosting.Level.LEVEL_1)
         self.assertTrue(
             AuditLog.objects.filter(
                 action=AuditLog.Action.RECRUITMENT_ENTRY_CREATED,
                 metadata__entry_code="COS-NEW",
             ).exists()
         )
+
+    def test_entry_save_resyncs_office_metadata_when_position_reference_changes(self):
+        self.level1_position.position_reference = self.medical_officer_position
+        self.level1_position.save()
+
+        self.level1_position.refresh_from_db()
+        self.assertEqual(self.level1_position.title, self.medical_officer_position.position_title)
+        self.assertEqual(self.level1_position.level, PositionPosting.Level.LEVEL_2)
+        self.assertEqual(self.level1_position.unit, "Regional Office")
+
+    def test_recruitment_entry_creation_requires_position_reference(self):
+        client = Client()
+        client.force_login(self.secretariat)
+        response = client.post(
+            reverse("recruitment-entry-create"),
+            {
+                "position_reference": "",
+                "job_code": "COS-NOREF",
+                "branch": PositionPosting.Branch.COS,
+                "intake_mode": PositionPosting.IntakeMode.CONTINUOUS,
+                "status": PositionPosting.EntryStatus.ACTIVE,
+                "publication_date": "",
+                "opening_date": "2026-03-27",
+                "closing_date": "",
+                "qualification_reference": "Missing reference should fail.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Select a position reference before creating the recruitment entry.")
+        self.assertFalse(PositionPosting.objects.filter(job_code="COS-NOREF").exists())
+
+    def test_inactive_position_reference_cannot_be_used_for_entry_creation(self):
+        inactive_reference = PositionReference.objects.create(
+            position_title="Inactive Reference",
+            salary_grade=11,
+            level_classification=PositionReference.LevelClassification.FIRST_LEVEL,
+            class_id="INACT1",
+            os_code="01-GA",
+            occupational_service="General Administrative Service",
+            occupational_group="Administrative",
+            reference_status=PositionReference.ReferenceStatus.VERIFIED_REFERENCE,
+            is_active=False,
+        )
+        client = Client()
+        client.force_login(self.secretariat)
+
+        response = client.post(
+            reverse("recruitment-entry-create"),
+            {
+                "position_reference": inactive_reference.pk,
+                "job_code": "COS-INACTIVE",
+                "branch": PositionPosting.Branch.COS,
+                "intake_mode": PositionPosting.IntakeMode.CONTINUOUS,
+                "status": PositionPosting.EntryStatus.ACTIVE,
+                "publication_date": "",
+                "opening_date": "2026-03-27",
+                "closing_date": "",
+                "qualification_reference": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Select a valid choice. That choice is not one of the available choices.")
+        self.assertFalse(PositionPosting.objects.filter(job_code="COS-INACTIVE").exists())
+
+    def test_incomplete_position_reference_warns_and_does_not_invent_routing_metadata(self):
+        incomplete_reference = PositionReference.objects.create(
+            position_title="Incomplete Reference",
+            reference_status=PositionReference.ReferenceStatus.INCOMPLETE_REFERENCE,
+            is_active=True,
+            position_code="POS-999",
+            notes="Synthetic incomplete record for test coverage.",
+        )
+        client = Client()
+        client.force_login(self.secretariat)
+
+        response = client.post(
+            reverse("recruitment-entry-create"),
+            {
+                "position_reference": incomplete_reference.pk,
+                "job_code": "COS-INCOMPLETE",
+                "branch": PositionPosting.Branch.COS,
+                "intake_mode": PositionPosting.IntakeMode.CONTINUOUS,
+                "status": PositionPosting.EntryStatus.DRAFT,
+                "publication_date": "",
+                "opening_date": "2026-03-27",
+                "closing_date": "",
+                "qualification_reference": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Reference metadata is incomplete")
+        self.assertContains(
+            response,
+            "This position reference does not contain the level classification required for routing.",
+        )
+        self.assertFalse(PositionPosting.objects.filter(job_code="COS-INCOMPLETE").exists())
 
     def test_non_entry_manager_cannot_access_entry_management(self):
         client = Client()
@@ -647,12 +807,49 @@ class ApplicantPortalFlowTests(BaseRecruitmentTestCase):
         response = self.client.get(reverse("applicant-portal"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Vacancies List")
-        self.assertContains(response, "Vacancy Detail")
+        self.assertContains(response, "Job Openings")
+        self.assertContains(response, self.level1_position.title)
+        self.assertContains(response, self.cos_position.title)
         self.assertNotContains(response, "Internal Login")
         self.assertNotContains(response, "My Queue")
         self.assertNotContains(response, "Manage Entries")
         self.assertNotContains(response, "Internal Users")
+
+    def test_public_vacancy_detail_uses_reference_metadata_over_legacy_entry_text(self):
+        self.level1_position.description = "Legacy description should stay hidden."
+        self.level1_position.requirements = "Legacy requirements should stay hidden."
+        self.level1_position.qualification_reference = "Entry-specific note for screening."
+        self.level1_position.save(update_fields=["description", "requirements", "qualification_reference", "updated_at"])
+        self.admin_aide_position.qs_education = "Bachelor's degree relevant to the role"
+        self.admin_aide_position.save(update_fields=["qs_education", "updated_at"])
+
+        response = self.client.get(
+            reverse("applicant-vacancy-detail", kwargs={"pk": self.level1_position.pk})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Entry-specific note for screening.")
+        self.assertContains(response, "Education: Bachelor&#x27;s degree relevant to the role")
+        self.assertNotContains(response, "Legacy description should stay hidden.")
+        self.assertNotContains(response, "Legacy requirements should stay hidden.")
+
+    def test_internal_position_list_uses_reference_metadata_over_legacy_entry_text(self):
+        self.level1_position.description = "Legacy internal description should stay hidden."
+        self.level1_position.requirements = "Legacy internal requirements should stay hidden."
+        self.level1_position.qualification_reference = "Internal entry note."
+        self.level1_position.save(update_fields=["description", "requirements", "qualification_reference", "updated_at"])
+        self.admin_aide_position.qs_training = "Eight hours of records management training"
+        self.admin_aide_position.save(update_fields=["qs_training", "updated_at"])
+
+        client = Client()
+        client.force_login(self.secretariat)
+        response = client.get(reverse("position-list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Internal entry note.")
+        self.assertContains(response, "Training: Eight hours of records management training")
+        self.assertNotContains(response, "Legacy internal description should stay hidden.")
+        self.assertNotContains(response, "Legacy internal requirements should stay hidden.")
 
     def test_plantilla_public_submission_requires_valid_otp_before_finalization(self):
         client = Client()
@@ -739,7 +936,8 @@ class ApplicantPortalFlowTests(BaseRecruitmentTestCase):
                 "email": "cos.portal@example.com",
             },
         )
-        self.assertContains(status_response, application.get_status_display())
+        self.assertContains(status_response, "Under Review")
+        self.assertContains(status_response, application.reference_number)
 
     def test_invalid_otp_is_rejected(self):
         client = Client()
@@ -1211,7 +1409,7 @@ class RecruitmentCaseWorkflowTests(BaseRecruitmentTestCase):
         self.assertContains(response, "Examination Management")
         self.assertContains(response, "Workflow Snapshot")
         self.assertContains(response, "Case Timeline")
-        self.assertContains(response, "Initial Routing")
+        self.assertContains(response, "Application Routed")
         self.assertContains(response, "Case Created")
 
 
@@ -2201,8 +2399,8 @@ class NotificationManagementTests(BaseRecruitmentTestCase):
         self.assertEqual(notification.delivery_status, NotificationLog.DeliveryStatus.SENT)
         self.assertEqual(notification.triggered_by, self.secretariat)
         self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].subject, notification.subject)
         self.assertContains(response, "Requirement Checklist Notification")
-        self.assertContains(response, notification.subject)
 
     def test_secretariat_cannot_send_requirement_checklist_before_selection(self):
         application = self.make_submitted_application()
@@ -2923,8 +3121,8 @@ class FinalDecisionHandlingTests(BaseRecruitmentTestCase):
         response = client.get(reverse("application-detail", kwargs={"pk": application.pk}))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Interview Scheduling")
-        self.assertContains(response, "Deliberation Record")
+        self.assertContains(response, 'data-section="section-interview">Interview</a>')
+        self.assertContains(response, 'data-section="section-deliberation">Deliberation/CAR</a>')
         self.assertContains(response, "Workflow Snapshot")
         self.assertContains(response, "Final Decision Recording")
 

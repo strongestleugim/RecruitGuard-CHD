@@ -14,7 +14,7 @@ It uses level-aware internal routing:
 ## Core Entities
 - Applicant
 - InternalUser
-- Position
+- PositionReference
 - RecruitmentEntry
 - Application
 - RecruitmentCase
@@ -32,7 +32,7 @@ It uses level-aware internal routing:
 - AuditLog
 
 ## Core Distinctions
-- Position Title is separate from Engagement Type
+- PositionReference is separate from RecruitmentEntry and Engagement Type
 - RecruitmentEntry is separate from Application
 - Application is separate from RecruitmentCase
 - Plantilla and COS are separate branches within one system
@@ -43,6 +43,7 @@ It uses level-aware internal routing:
 
 ## Key Relationship Rules
 - One Applicant can have many Applications
+- One PositionReference can have many RecruitmentEntries
 - One RecruitmentEntry can have many Applications
 - One Application creates one RecruitmentCase
 - One RecruitmentCase can have many CaseAssignments over time
@@ -61,7 +62,7 @@ It uses level-aware internal routing:
 - One RecruitmentCase can have many AuditLog records
 
 ## Routing Rules
-- RecruitmentCase stores branch type and routing basis
+- RecruitmentCase stores branch type and routing basis derived from the selected PositionReference
 - CaseAssignment preserves routing history
 - Level 1 routes to Secretariat
 - Level 2 routes to HRM Chief

@@ -5,9 +5,9 @@ from django.urls import reverse
 from django.views import View
 from django.views.generic import CreateView, ListView, UpdateView
 
-from .forms import PositionForm, RecruitmentEntryForm
-from .models import Position, PositionPosting
-from .permissions import EntryManagerRequiredMixin
+from .forms import PositionReferenceForm, RecruitmentEntryForm
+from .models import PositionPosting, PositionReference
+from .permissions import EntryManagerRequiredMixin, SystemAdministratorRequiredMixin
 from .services import (
     get_manageable_positions,
     get_manageable_recruitment_entries,
@@ -25,10 +25,10 @@ class PositionCatalogListView(LoginRequiredMixin, EntryManagerRequiredMixin, Lis
         return get_manageable_positions(self.request.user)
 
 
-class PositionCatalogCreateView(LoginRequiredMixin, EntryManagerRequiredMixin, CreateView):
+class PositionCatalogCreateView(LoginRequiredMixin, SystemAdministratorRequiredMixin, CreateView):
     template_name = "recruitment/position_catalog_form.html"
-    model = Position
-    form_class = PositionForm
+    model = PositionReference
+    form_class = PositionReferenceForm
 
     def form_valid(self, form):
         self.object = persist_position(
@@ -36,17 +36,17 @@ class PositionCatalogCreateView(LoginRequiredMixin, EntryManagerRequiredMixin, C
             actor=self.request.user,
             changed_fields=form.changed_data,
         )
-        messages.success(self.request, "Position catalog record created.")
+        messages.success(self.request, "Position reference catalog record created.")
         return redirect(self.get_success_url())
 
     def get_success_url(self):
         return reverse("position-catalog-list")
 
 
-class PositionCatalogUpdateView(LoginRequiredMixin, EntryManagerRequiredMixin, UpdateView):
+class PositionCatalogUpdateView(LoginRequiredMixin, SystemAdministratorRequiredMixin, UpdateView):
     template_name = "recruitment/position_catalog_form.html"
-    model = Position
-    form_class = PositionForm
+    model = PositionReference
+    form_class = PositionReferenceForm
 
     def form_valid(self, form):
         self.object = persist_position(
@@ -54,7 +54,7 @@ class PositionCatalogUpdateView(LoginRequiredMixin, EntryManagerRequiredMixin, U
             actor=self.request.user,
             changed_fields=form.changed_data,
         )
-        messages.success(self.request, "Position catalog record updated.")
+        messages.success(self.request, "Position reference catalog record updated.")
         return redirect(self.get_success_url())
 
     def get_success_url(self):
@@ -74,6 +74,11 @@ class RecruitmentEntryCreateView(LoginRequiredMixin, EntryManagerRequiredMixin, 
     model = PositionPosting
     form_class = RecruitmentEntryForm
 
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["selected_position_reference"] = context["form"].selected_position_reference
+        return context
+
     def form_valid(self, form):
         self.object = persist_recruitment_entry(
             entry=form.save(commit=False),
@@ -91,6 +96,11 @@ class RecruitmentEntryUpdateView(LoginRequiredMixin, EntryManagerRequiredMixin, 
     template_name = "recruitment/recruitment_entry_form.html"
     model = PositionPosting
     form_class = RecruitmentEntryForm
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["selected_position_reference"] = context["form"].selected_position_reference
+        return context
 
     def form_valid(self, form):
         self.object = persist_recruitment_entry(

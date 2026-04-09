@@ -4,7 +4,7 @@
 Manages internal authentication, session control, and role-based permissions.
 
 ## 2. Recruitment Entry and Vacancy Management
-Manages Plantilla vacancies and COS openings/pooling entries.
+Manages the controlled Position Reference catalog plus Plantilla vacancies and COS openings/pooling entries created from that catalog.
 
 ## 3. Applicant Intake and OTP Verification
 Handles applicant-facing submission, OTP verification, and application finalization.

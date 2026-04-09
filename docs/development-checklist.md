@@ -81,8 +81,9 @@ Suggested Django app grouping:
 - [ ] Tests for restricted access
 
 ### Phase 3: Recruitment Entry and Vacancy Management
-- [ ] Position model
+- [ ] PositionReference catalog model
 - [ ] RecruitmentEntry model
+- [ ] Controlled selection from PositionReference during entry creation
 - [ ] Plantilla entry creation
 - [ ] COS opening creation
 - [ ] COS pooling entry creation

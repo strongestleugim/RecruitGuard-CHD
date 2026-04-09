@@ -34,7 +34,7 @@ from .models import (
     FinalDecision,
     InterviewRating,
     InterviewSession,
-    Position,
+    PositionReference,
     PositionPosting,
     RecruitmentApplication,
     RecruitmentCase,
@@ -298,8 +298,8 @@ def _user_has_closed_application_access(user, application):
 
 def get_manageable_positions(user):
     if user.role not in ENTRY_MANAGER_ROLES:
-        return Position.objects.none()
-    return Position.objects.all().order_by("title", "position_code")
+        return PositionReference.objects.none()
+    return PositionReference.objects.all().order_by("position_title", "salary_grade", "class_id")
 
 
 def get_manageable_recruitment_entries(user):
@@ -4237,12 +4237,13 @@ def build_export_bundle(application, actor):
 
 def persist_position(position, actor, changed_fields):
     is_create = position.pk is None
+    position.full_clean()
     position.save()
     action = AuditLog.Action.POSITION_CREATED if is_create else AuditLog.Action.POSITION_UPDATED
     description = (
-        f"Created position catalog record '{position.position_code}'."
+        f"Created position reference catalog record '{position.position_title}'."
         if is_create
-        else f"Updated position catalog record '{position.position_code}'."
+        else f"Updated position reference catalog record '{position.position_title}'."
     )
     record_system_audit_event(
         actor=actor,
@@ -4250,7 +4251,9 @@ def persist_position(position, actor, changed_fields):
         description=description,
         metadata={
             "position_id": position.id,
-            "position_code": position.position_code,
+            "position_slug": position.position_slug,
+            "position_title": position.position_title,
+            "reference_status": position.reference_status,
             "changed_fields": changed_fields,
         },
     )
@@ -4262,6 +4265,8 @@ def persist_recruitment_entry(entry, actor, changed_fields):
     entry.updated_by = actor
     if is_create and not entry.created_by_id:
         entry.created_by = actor
+    entry.apply_position_reference_metadata()
+    entry.full_clean()
     entry.save()
     action = (
         AuditLog.Action.RECRUITMENT_ENTRY_CREATED
@@ -4283,6 +4288,7 @@ def persist_recruitment_entry(entry, actor, changed_fields):
             "engagement_type": entry.branch,
             "routing_basis": entry.level,
             "status": entry.status,
+            "position_reference_id": entry.position_reference_id,
             "changed_fields": changed_fields,
         },
     )

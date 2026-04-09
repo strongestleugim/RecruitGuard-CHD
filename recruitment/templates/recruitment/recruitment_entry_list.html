@@ -6,10 +6,10 @@
     <div>
         <p class="rg-eyebrow">Recruitment Entry Management</p>
         <h1 class="rg-page-title">Recruitment Entries</h1>
-        <p class="rg-page-copy">Manage Plantilla vacancies and COS openings or pooling entries without changing the shared backend or branch-specific workflow logic.</p>
+        <p class="rg-page-copy">Manage Plantilla vacancies and COS openings or pooling entries using controlled Position References as the source of official position metadata.</p>
     </div>
     <div class="rg-page-actions">
-        <a href="{% url 'position-catalog-list' %}" class="btn btn-outline-secondary">Position Catalog</a>
+        <a href="{% url 'position-catalog-list' %}" class="btn btn-outline-secondary">Position References</a>
         <a href="{% url 'recruitment-entry-create' %}" class="btn btn-rg-primary">New Entry</a>
     </div>
 </div>
@@ -28,7 +28,7 @@
     <div class="rg-kpi">
         <span class="rg-kpi__label">Routing Control</span>
         <strong class="rg-kpi__value">Level-Aware</strong>
-        <span class="rg-kpi__hint">Recorded level remains visible at entry setup</span>
+        <span class="rg-kpi__hint">Routing basis is derived from the linked Position Reference</span>
     </div>
     <div class="rg-kpi">
         <span class="rg-kpi__label">Portal Scope</span>
@@ -60,8 +60,15 @@
                         </td>
                         <td>
                             {% if entry.position_reference %}
-                                <div>{{ entry.position_reference.title }}</div>
-                                <div class="small text-muted">{{ entry.position_reference.position_code }} | {{ entry.unit }}</div>
+                                <div>{{ entry.position_reference.position_title }}</div>
+                                <div class="small text-muted">
+                                    {% if entry.position_reference.class_id %}{{ entry.position_reference.class_id }}{% else %}Class ID pending{% endif %}
+                                    {% if entry.position_reference.salary_grade %} | SG {{ entry.position_reference.salary_grade }}{% endif %}
+                                    | {{ entry.official_office_label|default:"No office default recorded" }}
+                                </div>
+                                {% if entry.position_reference.reference_status != "VERIFIED_REFERENCE" %}
+                                    <div class="small text-warning mt-1">{{ entry.position_reference.get_reference_status_display }}</div>
+                                {% endif %}
                             {% else %}
                                 <div class="text-muted">No linked position reference</div>
                             {% endif %}
@@ -72,7 +79,12 @@
                                 <span class="rg-pill rg-pill--info">{{ entry.get_intake_mode_display }}</span>
                             </div>
                         </td>
-                        <td><span class="rg-pill rg-pill--{{ entry.level|level_theme }}">{{ entry.get_level_display }}</span></td>
+                        <td>
+                            <span class="rg-pill rg-pill--{{ entry.level|level_theme }}">{{ entry.get_level_display }}</span>
+                            {% if entry.position_reference and entry.position_reference.reference_status != "VERIFIED_REFERENCE" %}
+                                <div class="small text-muted mt-1">Reference warning on file</div>
+                            {% endif %}
+                        </td>
                         <td><span class="rg-pill rg-pill--{{ entry.status|status_theme }}">{{ entry.get_status_display }}</span></td>
                         <td>
                             <div>{{ entry.opening_date|date:"M d, Y" }}</div>

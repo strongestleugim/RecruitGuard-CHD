@@ -63,7 +63,7 @@ This document summarizes the high-level use cases of RecruitGuard-CHD. The use c
 ---
 
 ### 5.2 Recruitment Entry Management
-*Description:* Allows the authorized internal handler to create, update, activate, suspend, or close Plantilla and COS recruitment entries.
+*Description:* Allows the authorized internal handler to create, update, activate, suspend, or close Plantilla and COS recruitment entries using a controlled Position Reference catalog.
 
 *Primary Actors:* Secretariat, HRM Chief
 
@@ -71,11 +71,12 @@ This document summarizes the high-level use cases of RecruitGuard-CHD. The use c
 
 *Basic Course of Events:*
 1. Authorized user opens recruitment entry management.
-2. User creates or edits an entry.
-3. User enters position, engagement type, level classification or routing basis, and intake conditions.
-4. User saves the entry.
-5. System validates and stores the record.
-6. Entry may be activated, suspended, or closed according to the user’s authority.
+2. User selects an official position from the Position Reference catalog.
+3. System displays the linked reference metadata for review, including level classification or routing basis.
+4. User configures the recruitment entry details such as engagement type, intake conditions, and entry-specific notes.
+5. User saves the entry.
+6. System validates and stores the record using the selected Position Reference as the official source of position metadata.
+7. Entry may be activated, suspended, or closed according to the user’s authority.
 
 ---
 

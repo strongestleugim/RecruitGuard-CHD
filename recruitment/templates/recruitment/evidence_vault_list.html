@@ -62,6 +62,9 @@
                                     {% if item.context_application %}
                                         <br><span style="font-size:.65rem;color:#8b96a0;">{{ item.context_application.reference_label }}</span>
                                     {% endif %}
+                                    {% if item.is_archived %}
+                                        <br><span style="font-size:.65rem;color:#8c4b00;">Archived{% if item.archive_tag %}: {{ item.archive_tag }}{% endif %}</span>
+                                    {% endif %}
                                 </td>
                                 <td>
                                     {% if item.evidence_stage %}

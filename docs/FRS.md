@@ -133,7 +133,7 @@ iv. Account and role-related changes shall be recorded in the audit log.
 # Module 2. Recruitment Entry and Vacancy Management
 
 ## Purpose
-Manages recruitment entries for both Plantilla and COS.
+Manages the controlled Position Reference catalog and recruitment entries for both Plantilla and COS.
 
 ## Primary Actors
 - Secretariat
@@ -147,11 +147,13 @@ Manages recruitment entries for both Plantilla and COS.
 
 ## Detailed Functional Requirements
 
-### a. Plantilla and COS Recruitment Entry Creation
-i. System shall allow creation of Plantilla recruitment entries.  
-ii. System shall allow creation of COS recruitment entries.  
-iii. COS entries shall support opening-based and pooling-based intake handling.  
-iv. Each recruitment entry shall store position title, engagement type, and level classification or routing basis.  
+### a. Controlled Position Reference Selection and Recruitment Entry Creation
+i. System shall maintain a controlled Position Reference catalog containing official position metadata used during recruitment entry creation.  
+ii. System shall allow creation of Plantilla recruitment entries by selecting an existing Position Reference.  
+iii. System shall allow creation of COS recruitment entries by selecting an existing Position Reference.  
+iv. COS entries shall support opening-based and pooling-based intake handling.  
+v. Each recruitment entry shall link to a selected Position Reference rather than allowing routine free-form creation of an official position.  
+vi. Position title, level classification, and other linked official metadata used for routing shall come from the selected Position Reference.  
 
 ### b. Publication, Opening, and Intake Status
 i. System shall record publication or opening data for each recruitment entry.  
@@ -161,9 +163,10 @@ iv. System shall allow authorized users to activate, suspend, update, and close 
 
 ### c. Entry Metadata and Qualification Reference
 i. System shall preserve recruitment metadata necessary for downstream workflow handling.  
-ii. Plantilla entries shall support qualification-related fields where applicable.  
-iii. System shall record the creator and last updater of each entry together with timestamps.  
-iv. Entry status changes shall be recorded in the audit log.  
+ii. Linked Position Reference metadata shall remain visible for review during recruitment entry setup.  
+iii. Plantilla entries shall support qualification-related fields where applicable.  
+iv. System shall record the creator and last updater of each entry together with timestamps.  
+v. Entry status changes shall be recorded in the audit log.  
 
 ---
 

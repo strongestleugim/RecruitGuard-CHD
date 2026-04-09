@@ -65,23 +65,38 @@ role_type covers:
 
 ---
 
-## 3. Position
+## 3. PositionReference
 
 ### Purpose
-Stores reusable position titles and their usual classification references.
+Stores controlled official position metadata reused by recruitment entries.
 
 ### Attributes
-- position_id (PK)
+- position_reference_id (PK)
 - position_title
-- usual_level
-- description
+- position_slug
+- salary_grade
+- level_classification
+- class_id
+- os_code
+- occupational_service
+- occupational_group
+- reference_status
 - is_active
+- notes
+- position_code
+- agency_item_number
+- office_division_default
+- qs_education
+- qs_training
+- qs_experience
+- qs_eligibility
+- employment_track_applicability
 
 ### Relationships
-- One Position can have many RecruitmentEntry records
+- One PositionReference can have many RecruitmentEntry records
 
 ### Cardinality
-- Position 1 : M RecruitmentEntry
+- PositionReference 1 : M RecruitmentEntry
 
 ---
 
@@ -92,7 +107,7 @@ Represents the recruitment opening or entry point for either Plantilla or COS.
 
 ### Attributes
 - entry_id (PK)
-- position_id (FK -> Position.position_id)
+- position_reference_id (FK -> PositionReference.position_reference_id)
 - engagement_type
 - entry_mode
 - routing_basis
@@ -111,7 +126,7 @@ Possible values:
 - intake_mode: Fixed Window, Continuous, Pooling
 
 ### Relationships
-- One RecruitmentEntry belongs to one Position
+- One RecruitmentEntry belongs to one PositionReference
 - One RecruitmentEntry can have many Applications
 - One RecruitmentEntry can have many InterviewSession records
 - One RecruitmentEntry can have many DeliberationRecord records
@@ -121,7 +136,7 @@ Possible values:
 - One RecruitmentEntry can have many AuditLog records
 
 ### Cardinality
-- Position 1 : M RecruitmentEntry
+- PositionReference 1 : M RecruitmentEntry
 - RecruitmentEntry 1 : M Application
 - RecruitmentEntry 1 : M InterviewSession
 - RecruitmentEntry 1 : M DeliberationRecord
@@ -526,6 +541,7 @@ Stores audit-trail records for workflow and security-relevant actions.
 # Relationship Summary
 
 ## Main Flow
+- PositionReference 1 : M RecruitmentEntry
 - Applicant 1 : M Application
 - RecruitmentEntry 1 : M Application
 - Application 1 : 1 RecruitmentCase
@@ -554,7 +570,7 @@ Stores audit-trail records for workflow and security-relevant actions.
 - RecruitmentCase 1 : 0..1 CompletionRecord
 
 # Design Notes
-- Position is separate from RecruitmentEntry
+- PositionReference is separate from RecruitmentEntry
 - Application is separate from RecruitmentCase
 - COS and Plantilla share one system but use different branch logic
 - Level classification / routing basis is a workflow control

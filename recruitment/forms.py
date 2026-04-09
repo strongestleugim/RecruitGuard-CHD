@@ -2,7 +2,7 @@ from django import forms
 from django.conf import settings
 from django.contrib.auth.forms import AuthenticationForm, PasswordChangeForm, UserCreationForm
 from django.forms import BaseInlineFormSet, inlineformset_factory
-from django.forms.models import construct_instance
+from django.forms.models import ModelChoiceIteratorValue, construct_instance
 from django.utils import timezone
 
 from .models import (
@@ -16,7 +16,7 @@ from .models import (
     FinalDecision,
     InterviewRating,
     InterviewSession,
-    Position,
+    PositionReference,
     PositionPosting,
     RecruitmentApplication,
     RecruitmentUser,
@@ -66,6 +66,31 @@ class MultipleFileField(forms.FileField):
         if self.required and not cleaned_files:
             raise forms.ValidationError("At least one file is required.")
         return cleaned_files
+
+
+class PositionReferenceSelect(forms.Select):
+    def create_option(self, name, value, label, selected, index, subindex=None, attrs=None):
+        option = super().create_option(name, value, label, selected, index, subindex=subindex, attrs=attrs)
+        instance = value.instance if isinstance(value, ModelChoiceIteratorValue) else None
+        if instance is not None:
+            option["attrs"].update(
+                {
+                    "data-position-title": instance.position_title or "",
+                    "data-salary-grade": instance.salary_grade or "",
+                    "data-level-classification": instance.get_level_classification_display()
+                    if instance.level_classification
+                    else "",
+                    "data-class-id": instance.class_id or "",
+                    "data-os-code": instance.os_code or "",
+                    "data-occupational-service": instance.occupational_service or "",
+                    "data-occupational-group": instance.occupational_group or "",
+                    "data-reference-status": instance.reference_status or "",
+                    "data-reference-status-label": instance.get_reference_status_display(),
+                    "data-reference-warning": instance.get_selection_warning(),
+                    "data-is-active": "true" if instance.is_active else "false",
+                }
+            )
+        return option
 
 
 def internal_role_choices():
@@ -170,7 +195,7 @@ class ApplicantPortalIntakeForm(BootstrapFormMixin, forms.Form):
             help_text = requirement.help_text
             help_text = f"{help_text} Combine multiple pages or certificates into one file when needed."
             self.fields[requirement.file_field_name] = forms.FileField(
-                required=requirement.is_required,
+                required=False,
                 label=requirement.title,
                 help_text=help_text,
             )
@@ -774,26 +799,41 @@ class FinalDecisionForm(DeferredModelValidationMixin, BootstrapFormMixin, forms.
         self._apply_bootstrap()
 
 
-class PositionForm(BootstrapFormMixin, forms.ModelForm):
+class PositionReferenceForm(BootstrapFormMixin, forms.ModelForm):
     class Meta:
-        model = Position
+        model = PositionReference
         fields = [
-            "position_code",
-            "title",
-            "unit",
-            "description",
-            "requirements",
-            "qualification_reference",
+            "position_title",
+            "position_slug",
+            "salary_grade",
+            "level_classification",
+            "class_id",
+            "os_code",
+            "occupational_service",
+            "occupational_group",
+            "reference_status",
             "is_active",
+            "notes",
+            "position_code",
+            "agency_item_number",
+            "office_division_default",
+            "qs_education",
+            "qs_training",
+            "qs_experience",
+            "qs_eligibility",
+            "employment_track_applicability",
         ]
         widgets = {
-            "description": forms.Textarea(attrs={"rows": 4}),
-            "requirements": forms.Textarea(attrs={"rows": 4}),
-            "qualification_reference": forms.Textarea(attrs={"rows": 3}),
+            "notes": forms.Textarea(attrs={"rows": 3}),
+            "qs_education": forms.Textarea(attrs={"rows": 2}),
+            "qs_training": forms.Textarea(attrs={"rows": 2}),
+            "qs_experience": forms.Textarea(attrs={"rows": 2}),
+            "qs_eligibility": forms.Textarea(attrs={"rows": 2}),
         }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields["position_slug"].help_text = "Leave blank to generate the slug automatically from the title."
         self._apply_bootstrap()
 
 
@@ -804,7 +844,6 @@ class RecruitmentEntryForm(BootstrapFormMixin, forms.ModelForm):
             "position_reference",
             "job_code",
             "branch",
-            "level",
             "intake_mode",
             "status",
             "publication_date",
@@ -813,6 +852,7 @@ class RecruitmentEntryForm(BootstrapFormMixin, forms.ModelForm):
             "qualification_reference",
         ]
         widgets = {
+            "position_reference": PositionReferenceSelect(),
             "publication_date": forms.DateInput(attrs={"type": "date"}),
             "opening_date": forms.DateInput(attrs={"type": "date"}),
             "closing_date": forms.DateInput(attrs={"type": "date"}),
@@ -821,25 +861,63 @@ class RecruitmentEntryForm(BootstrapFormMixin, forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["position_reference"].queryset = Position.objects.filter(is_active=True).order_by(
-            "title",
-            "position_code",
+        self.fields["position_reference"].queryset = PositionReference.objects.filter(is_active=True).order_by(
+            "position_title",
+            "salary_grade",
+            "class_id",
         )
         if self.instance.pk and self.instance.position_reference_id:
             self.fields["position_reference"].queryset = (
                 self.fields["position_reference"].queryset
-                | Position.objects.filter(pk=self.instance.position_reference_id)
+                | PositionReference.objects.filter(pk=self.instance.position_reference_id)
             )
+        self.fields["position_reference"].empty_label = "Select an official position reference"
+        self.fields["position_reference"].label = "Position Reference"
+        self.fields["position_reference"].help_text = (
+            "Choose from the controlled master Position Reference catalog. Official positions cannot be encoded here."
+        )
         self.fields["job_code"].label = "Entry Code"
         self.fields["branch"].label = "Engagement Type"
-        self.fields["level"].label = "Routing Basis"
+        self.fields["qualification_reference"].label = "Entry Notes / Qualification Reference"
+        self.selected_position_reference = self._resolve_selected_position_reference()
         self._apply_bootstrap()
+
+    def _resolve_selected_position_reference(self):
+        selected_value = None
+        if self.is_bound:
+            selected_value = self.data.get(self.add_prefix("position_reference"))
+        elif self.instance.pk and self.instance.position_reference_id:
+            selected_value = self.instance.position_reference_id
+        if not selected_value:
+            return None
+        try:
+            return PositionReference.objects.filter(pk=selected_value).first()
+        except (TypeError, ValueError):
+            return None
 
     def clean(self):
         cleaned_data = super().clean()
+        position_reference = cleaned_data.get("position_reference")
         branch = cleaned_data.get("branch")
         intake_mode = cleaned_data.get("intake_mode")
         closing_date = cleaned_data.get("closing_date")
+
+        if position_reference is None:
+            self.add_error("position_reference", "Select a position reference before creating the recruitment entry.")
+        else:
+            if not position_reference.is_active:
+                self.add_error(
+                    "position_reference",
+                    "Inactive position references cannot be used for recruitment entries.",
+                )
+            elif position_reference.routing_level is None:
+                self.add_error(
+                    "position_reference",
+                    "This position reference does not contain the level classification required for routing.",
+                )
+            else:
+                self.instance.level = position_reference.routing_level
+                self.instance.title = position_reference.position_title
 
         if branch == PositionPosting.Branch.PLANTILLA and intake_mode != PositionPosting.IntakeMode.FIXED_PERIOD:
             self.add_error("intake_mode", "Plantilla entries must use the fixed period intake mode.")

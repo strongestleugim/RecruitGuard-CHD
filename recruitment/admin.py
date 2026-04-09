@@ -13,7 +13,7 @@ from .models import (
     InterviewRating,
     InterviewSession,
     NotificationLog,
-    Position,
+    PositionReference,
     PositionPosting,
     RecruitmentApplication,
     RecruitmentCase,
@@ -43,11 +43,26 @@ class RecruitmentUserAdmin(UserAdmin):
     list_filter = ("role", "is_active", "is_staff")
 
 
-@admin.register(Position)
-class PositionAdmin(admin.ModelAdmin):
-    list_display = ("position_code", "title", "unit", "is_active")
-    list_filter = ("is_active",)
-    search_fields = ("position_code", "title", "unit")
+@admin.register(PositionReference)
+class PositionReferenceAdmin(admin.ModelAdmin):
+    list_display = (
+        "position_title",
+        "salary_grade",
+        "level_classification",
+        "class_id",
+        "reference_status",
+        "is_active",
+    )
+    list_filter = ("level_classification", "reference_status", "is_active")
+    search_fields = (
+        "position_title",
+        "position_slug",
+        "position_code",
+        "class_id",
+        "os_code",
+        "occupational_service",
+        "occupational_group",
+    )
 
 
 @admin.register(PositionPosting)
@@ -58,12 +73,20 @@ class PositionPostingAdmin(admin.ModelAdmin):
         "branch",
         "intake_mode",
         "level",
+        "position_reference",
         "status",
         "opening_date",
         "closing_date",
     )
     list_filter = ("branch", "intake_mode", "level", "status")
-    search_fields = ("job_code", "title", "unit", "position_reference__position_code")
+    search_fields = (
+        "job_code",
+        "title",
+        "unit",
+        "position_reference__position_title",
+        "position_reference__class_id",
+        "position_reference__os_code",
+    )
     inlines = []
 
 

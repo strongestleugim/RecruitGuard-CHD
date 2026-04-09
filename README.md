@@ -15,7 +15,7 @@ Implemented now:
 
 - Internal identity and access control for the locked actor set: Applicant, Secretariat, HRM Chief, HRMPSB Member, Appointing Authority, and System Administrator
 - Protected internal login, logout, password change, and internal account management
-- Position catalog management plus recruitment entry management for Plantilla and COS
+- Controlled Position Reference catalog management plus recruitment entry management for Plantilla and COS
 - Public applicant intake with required document uploads, OTP verification, receipt generation, and status lookup
 - Branch-aware workflow handling for Plantilla and COS
 - Level-aware routing with `Level 1 -> Secretariat` and `Level 2 -> HRM Chief`

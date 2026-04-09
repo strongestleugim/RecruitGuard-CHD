@@ -60,7 +60,8 @@
             <div class="rg-pub-job-card__body">
                 <h3 class="rg-pub-job-card__title">{{ entry.title }}</h3>
                 <p class="rg-pub-job-card__meta">
-                    Permanent &middot; {{ entry.unit|default:"CHD CALABARZON" }}
+                    Permanent &middot;
+                    {{ entry.official_office_label|default:"CHD CALABARZON" }}
                 </p>
                 <p class="rg-pub-job-card__deadline {% if entry.is_closing_soon %}rg-pub-job-card__deadline--urgent{% endif %}">
                     {% if entry.closing_date %}
@@ -85,7 +86,8 @@
             <div class="rg-pub-job-card__body">
                 <h3 class="rg-pub-job-card__title">{{ entry.title }}</h3>
                 <p class="rg-pub-job-card__meta">
-                    Contract of Service &middot; {{ entry.unit|default:"CHD CALABARZON" }}
+                    Contract of Service &middot;
+                    {{ entry.official_office_label|default:"CHD CALABARZON" }}
                 </p>
                 <p class="rg-pub-job-card__deadline {% if entry.is_closing_soon %}rg-pub-job-card__deadline--urgent{% endif %}">
                     {% if entry.closing_date %}

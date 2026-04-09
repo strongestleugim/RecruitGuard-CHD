@@ -8,6 +8,25 @@ from django.utils import timezone
 from django.utils.text import slugify
 
 
+REFERENCE_LEVEL_TO_ROUTING_LEVEL = {
+    "FIRST_LEVEL": 1,
+    "SECOND_LEVEL": 2,
+}
+
+
+def build_unique_position_slug(model_class, source_value, *, instance_pk=None):
+    base_slug = slugify(source_value or "") or "position-reference"
+    slug = base_slug
+    suffix = 2
+    queryset = model_class.objects.all()
+    if instance_pk:
+        queryset = queryset.exclude(pk=instance_pk)
+    while queryset.filter(position_slug=slug).exists():
+        slug = f"{base_slug}-{suffix}"
+        suffix += 1
+    return slug
+
+
 class TimestampedModel(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -57,20 +76,124 @@ class RecruitmentUser(AbstractUser):
         return self.get_full_name() or self.username
 
 
-class Position(TimestampedModel):
-    position_code = models.CharField(max_length=30, unique=True)
-    title = models.CharField(max_length=255)
-    unit = models.CharField(max_length=255)
-    description = models.TextField()
-    requirements = models.TextField()
-    qualification_reference = models.TextField(blank=True)
+class PositionReference(TimestampedModel):
+    class LevelClassification(models.TextChoices):
+        FIRST_LEVEL = "FIRST_LEVEL", "First Level"
+        SECOND_LEVEL = "SECOND_LEVEL", "Second Level"
+
+    class ReferenceStatus(models.TextChoices):
+        VERIFIED_REFERENCE = "VERIFIED_REFERENCE", "Verified Reference"
+        NEEDS_REVIEW = "NEEDS_REVIEW", "Needs Review"
+        INCOMPLETE_REFERENCE = "INCOMPLETE_REFERENCE", "Incomplete Reference"
+
+    CORE_REFERENCE_FIELDS = (
+        "position_title",
+        "salary_grade",
+        "level_classification",
+        "class_id",
+        "os_code",
+        "occupational_service",
+        "occupational_group",
+    )
+
+    position_title = models.CharField(max_length=255)
+    position_slug = models.SlugField(max_length=255, unique=True, blank=True)
+    salary_grade = models.PositiveSmallIntegerField(blank=True, null=True)
+    level_classification = models.CharField(
+        max_length=20,
+        choices=LevelClassification.choices,
+        blank=True,
+        null=True,
+    )
+    class_id = models.CharField(max_length=50, blank=True, null=True)
+    os_code = models.CharField(max_length=50, blank=True, null=True)
+    occupational_service = models.CharField(max_length=255, blank=True, null=True)
+    occupational_group = models.CharField(max_length=255, blank=True, null=True)
+    reference_status = models.CharField(
+        max_length=30,
+        choices=ReferenceStatus.choices,
+        default=ReferenceStatus.NEEDS_REVIEW,
+    )
     is_active = models.BooleanField(default=True)
+    notes = models.TextField(blank=True)
+
+    position_code = models.CharField(max_length=30, unique=True, blank=True, null=True)
+    agency_item_number = models.CharField(max_length=100, blank=True, null=True)
+    office_division_default = models.CharField(max_length=255, blank=True, null=True)
+    qs_education = models.TextField(blank=True, null=True)
+    qs_training = models.TextField(blank=True, null=True)
+    qs_experience = models.TextField(blank=True, null=True)
+    qs_eligibility = models.TextField(blank=True, null=True)
+    employment_track_applicability = models.CharField(max_length=50, blank=True, null=True)
 
     class Meta:
-        ordering = ["title", "position_code"]
+        ordering = ["position_title", "salary_grade", "class_id"]
 
     def __str__(self):
-        return f"{self.title} ({self.position_code})"
+        reference_code = self.class_id or self.position_code or self.position_slug
+        return f"{self.position_title} ({reference_code})"
+
+    @property
+    def routing_level(self):
+        return REFERENCE_LEVEL_TO_ROUTING_LEVEL.get(self.level_classification)
+
+    @property
+    def missing_core_fields(self):
+        missing = []
+        for field_name in self.CORE_REFERENCE_FIELDS:
+            value = getattr(self, field_name)
+            if value is None or value == "":
+                missing.append(field_name)
+        return missing
+
+    def derive_reference_status(self, *, has_warning=False):
+        if self.missing_core_fields:
+            return self.ReferenceStatus.INCOMPLETE_REFERENCE
+        if has_warning:
+            return self.ReferenceStatus.NEEDS_REVIEW
+        return self.ReferenceStatus.VERIFIED_REFERENCE
+
+    def get_selection_warning(self):
+        if self.reference_status == self.ReferenceStatus.VERIFIED_REFERENCE:
+            return ""
+        if self.reference_status == self.ReferenceStatus.INCOMPLETE_REFERENCE:
+            missing_labels = [
+                self._meta.get_field(field_name).verbose_name.replace("_", " ")
+                for field_name in self.missing_core_fields
+            ]
+            if missing_labels:
+                return "Reference metadata is incomplete. Missing: " + ", ".join(missing_labels) + "."
+            return "Reference metadata is incomplete and requires manual follow-up."
+        return "Reference metadata needs manual review before it is treated as a fully verified official position."
+
+    @property
+    def qualification_summary(self):
+        parts = []
+        if self.qs_education:
+            parts.append(f"Education: {self.qs_education}")
+        if self.qs_training:
+            parts.append(f"Training: {self.qs_training}")
+        if self.qs_experience:
+            parts.append(f"Experience: {self.qs_experience}")
+        if self.qs_eligibility:
+            parts.append(f"Eligibility: {self.qs_eligibility}")
+        return "\n".join(parts)
+
+    def clean(self):
+        errors = {}
+        if self.reference_status == self.ReferenceStatus.VERIFIED_REFERENCE and self.missing_core_fields:
+            errors["reference_status"] = "Verified references must include the complete official starter metadata."
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        if not self.position_slug:
+            self.position_slug = build_unique_position_slug(
+                type(self),
+                self.position_title,
+                instance_pk=self.pk,
+            )
+        super().save(*args, **kwargs)
 
 
 class PositionPosting(TimestampedModel):
@@ -95,7 +218,7 @@ class PositionPosting(TimestampedModel):
         CLOSED = "closed", "Closed"
 
     position_reference = models.ForeignKey(
-        Position,
+        PositionReference,
         on_delete=models.PROTECT,
         related_name="recruitment_entries",
         blank=True,
@@ -143,11 +266,36 @@ class PositionPosting(TimestampedModel):
         verbose_name = "Recruitment Entry"
         verbose_name_plural = "Recruitment Entries"
 
+    @property
+    def official_office_label(self):
+        if self.position_reference_id:
+            if self.position_reference.office_division_default:
+                return self.position_reference.office_division_default
+            if self.position_reference.occupational_service:
+                return self.position_reference.occupational_service
+        return self.unit
+
+    def apply_position_reference_metadata(self):
+        if not self.position_reference_id:
+            return
+        self.title = self.position_reference.position_title
+        if self.position_reference.routing_level is not None:
+            self.level = self.position_reference.routing_level
+        if self.position_reference.office_division_default:
+            self.unit = self.position_reference.office_division_default
+
     def clean(self):
         errors = {}
 
         if not self.position_reference_id:
             errors["position_reference"] = "Position reference is required."
+        else:
+            if not self.position_reference.is_active:
+                errors["position_reference"] = "Inactive position references cannot be used for recruitment entries."
+            elif self.position_reference.routing_level is None:
+                errors["position_reference"] = (
+                    "The selected position reference does not contain a usable level classification."
+                )
         if self.closing_date and self.closing_date < self.opening_date:
             errors["closing_date"] = "Closing date cannot be earlier than opening date."
 
@@ -173,12 +321,7 @@ class PositionPosting(TimestampedModel):
 
     def save(self, *args, **kwargs):
         if self.position_reference_id:
-            self.title = self.position_reference.title
-            self.unit = self.position_reference.unit
-            self.description = self.position_reference.description
-            self.requirements = self.position_reference.requirements
-            if not self.qualification_reference:
-                self.qualification_reference = self.position_reference.qualification_reference
+            self.apply_position_reference_metadata()
         self.is_active = self.status == self.EntryStatus.ACTIVE
         super().save(*args, **kwargs)
 
